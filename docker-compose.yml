@@ -1,0 +1,31 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    container_name: shopify_postgres
+    environment:
+      POSTGRES_DB: shopify_chatbot
+      POSTGRES_USER: chatbot_user
+      POSTGRES_PASSWORD: secure_password_123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: shopify_qdrant
+    ports:
+      - "6335:6333"
+      - "6336:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__API_KEY=supersecret123
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
+  qdrant_data:
