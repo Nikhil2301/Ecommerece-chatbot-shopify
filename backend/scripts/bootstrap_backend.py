@@ -3,16 +3,19 @@
 Bootstrap the Shopify Chatbot backend:
 
 - Loads .env (DATABASE_URL, QDRANT_*, etc.)
+- Creates PostgreSQL database if missing
 - Creates/updates PostgreSQL tables via SQLAlchemy ORM
 - Ensures the Qdrant collection exists (creates it if missing)
 
 Usage (from repo root):
-  python3 scripts/bootstrap_backend.py
+  python scripts/bootstrap_backend.py
 """
 
 import os
 import sys
 import traceback
+from urllib.parse import urlparse
+from sqlalchemy import text  # import text for executable SQL
 
 # 1. Detect project root & insert into path
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -31,27 +34,68 @@ try:
 except ImportError:
     print("[bootstrap] python-dotenv not installed; skipping .env load")
 
+
 def ensure_db():
-    from sqlalchemy import create_engine
-    from app.database import Base  # import Base here
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import ProgrammingError
+    from app.database import Base
+
     DATABASE_URL = os.getenv("DATABASE_URL")
-    engine = create_engine(DATABASE_URL, future=True, echo=False)
-    print(f"[bootstrap] Using DATABASE_URL={DATABASE_URL}")
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL not set in .env")
+
+    url = urlparse(DATABASE_URL)
+    db_name = url.path.lstrip("/")
+    db_url_without_db = f"postgresql://{url.username}:{url.password}@{url.hostname}:{url.port}/postgres"
+
+    try:
+        engine = create_engine(db_url_without_db, future=True)
+        conn = engine.connect()
+        conn.execute(text("COMMIT"))
+        conn.execute(text(f"CREATE DATABASE {db_name}"))
+        print(f"[bootstrap] ✅ Database '{db_name}' created")
+        conn.close()
+    except ProgrammingError:
+        print(f"[bootstrap] Database '{db_name}' already exists")
+    except Exception as e:
+        print(f"[bootstrap] Error creating database: {e}")
+
+    engine = create_engine(DATABASE_URL, future=True)
     Base.metadata.create_all(bind=engine)
     print("[bootstrap] ✅ PostgreSQL tables created/verified")
 
-def ensure_qdrant():
-    from app.services.vector_service import VectorService
 
-    vector_service = VectorService()
-    
-    # Just ensure collection exists by instantiating VectorService,
-    # which runs _setup_collection() in __init__
-    info = vector_service.get_collection_info()
-    if info:
-        print(f"[bootstrap] ✅ Qdrant collection '{vector_service.collection_name}' ready")
-    else:
-        print(f"[bootstrap] ❌ Failed to verify Qdrant collection '{vector_service.collection_name}'")
+def ensure_qdrant():
+    from qdrant_client import QdrantClient
+    import os
+
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", 6333))
+    api_key = os.getenv("QDRANT_API_KEY") or None
+
+    try:
+        client = QdrantClient(
+            host=host,
+            port=port,
+            api_key=api_key,
+            https=False if api_key is None else True,
+            prefer_grpc=False
+        )
+
+        # List collections instead of fetching detailed info
+        collections = client.get_collections()
+        collection_names = [c.name for c in collections.collections]
+
+        target_collection = "products"  # or your collection name
+        if target_collection in collection_names:
+            print(f"[bootstrap] ✅ Qdrant collection '{target_collection}' ready")
+        else:
+            print(f"[bootstrap] ❌ Qdrant collection '{target_collection}' missing")
+
+    except Exception as e:
+        print(f"[bootstrap] ❌ Qdrant connection failed: {e}")
+        raise
+
 
 
 def main():
@@ -70,6 +114,7 @@ def main():
         sys.exit(2)
 
     print("[bootstrap] 🚀 Bootstrap complete")
+
 
 if __name__ == "__main__":
     main()

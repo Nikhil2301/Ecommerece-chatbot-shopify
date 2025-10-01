@@ -410,3 +410,7 @@ class VectorService:
         except Exception as e:
             logger.error(f"Error getting collection info: {e}")
             return {}
+    
+    def delete_all(self):
+        self.client.delete_collection(self.collection_name)
+        self._setup_collection()

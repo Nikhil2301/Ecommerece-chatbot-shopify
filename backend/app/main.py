@@ -11,6 +11,7 @@ import os
 from app.api.chat import router as chat_router
 from app.api.products import router as products_router
 from app.api.orders import router as orders_router
+from app.api.webhooks import router as webhooks_router
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,7 @@ app.add_middleware(
 app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 app.include_router(products_router, prefix="/api/v1", tags=["products"])
 app.include_router(orders_router, prefix="/api/v1", tags=["orders"])
+app.include_router(webhooks_router, prefix="/api/v1", tags=["webhooks"])
 
 @app.on_event("startup")
 async def startup_event():
