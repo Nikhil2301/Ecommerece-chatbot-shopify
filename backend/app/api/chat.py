@@ -213,6 +213,14 @@ def detect_product_specific_question(message: str, context_product: Optional[Dic
         r'please\s+provide\s+(?:the\s+)?(?:all\s+)?sizes?',
         r'give\s+me\s+(?:all\s+)?(?:the\s+)?(?:available\s+)?sizes?',
         
+        # NEW: Image questions
+        r'(?:show\s+me\s+)?(?:the\s+)?images?\s+(?:of\s+)?(?:this\s+)?(?:product)?',
+        r'(?:can\s+)?(?:i\s+)?(?:see\s+)?(?:the\s+)?(?:product\s+)?images?',
+        r'(?:display\s+|show\s+)?(?:product\s+)?photos?',
+        r'(?:what\s+does\s+)?(?:this|it)\s+look\s+like',
+        r'(?:show\s+me\s+)?(?:how\s+)?(?:it\s+|this\s+)?looks?',
+        r'(?:i\s+want\s+to\s+see\s+)?(?:the\s+)?images?',
+        
         # General product questions
         r'tell\s+me\s+about\s+(?:the\s+)?(?:this\s+)?(?:product|item)',
         r'(?:what\s+about\s+)?(?:this\s+)?(?:product|item)',
@@ -227,7 +235,8 @@ def detect_product_specific_question(message: str, context_product: Optional[Dic
         r'(?:give\s+me\s+)?(?:which\s+)?colors?\s+(?:are\s+)?available\s+(?:of\s+|for\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
         r'(?:give\s+me\s+)?(?:which\s+)?sizes?\s+(?:are\s+)?available\s+(?:of\s+|for\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
         r'(?:tell\s+me\s+about\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
-        r'(?:what\s+about\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected'
+        r'(?:what\s+about\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
+        r'(?:show\s+me\s+)?(?:the\s+)?images?\s+(?:of\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected'
     ]
     
     # Check for product position references
@@ -303,7 +312,9 @@ def detect_product_specific_question(message: str, context_product: Optional[Dic
             logger.info(f"Matched product question pattern {i+1}: {pattern}")
             
             # Determine question type
-            if 'color' in message_lower:
+            if 'image' in message_lower or 'photo' in message_lower or 'picture' in message_lower or 'look' in message_lower:
+                question_type = "images"
+            elif 'color' in message_lower:
                 question_type = "color"
             elif 'size' in message_lower:
                 question_type = "size"
@@ -324,7 +335,7 @@ def detect_product_specific_question(message: str, context_product: Optional[Dic
     # still treat it as a product question if it sounds like one
     if not is_product_question and target_product:
         # Check for simple keywords that indicate product questions
-        product_keywords = ['color', 'size', 'available', 'price', 'cost', 'discount', 'stock', 'option', 'material']
+        product_keywords = ['color', 'size', 'available', 'price', 'cost', 'discount', 'stock', 'option', 'material', 'image', 'photo', 'look']
         if any(keyword in message_lower for keyword in product_keywords):
             is_product_question = True
             logger.info("Detected product question based on keywords and target product presence")
@@ -370,6 +381,14 @@ def find_product_by_id(shopify_id: str, db: Session) -> Optional[Dict]:
                 "option3": variant.option3,
             })
 
+        # NEW: Include all images, not just first one
+        all_images = []
+        for img in product.images:
+            all_images.append({
+                "src": img.src,
+                "alt": img.alt_text or product.title
+            })
+
         return {
             "id": product.id,
             "shopify_id": product.shopify_id,
@@ -383,7 +402,7 @@ def find_product_by_id(shopify_id: str, db: Session) -> Optional[Dict]:
             "handle": product.handle,
             "status": product.status,
             "inventory_quantity": total_inventory,
-            "images": [{"src": first_image.src, "alt": first_image.alt_text}] if first_image else [],
+            "images": all_images,  # FIXED: Return all images
             "variants_count": len(product.variants),
             "options_count": len(product.options),
             "variants": variants_info,
@@ -392,6 +411,27 @@ def find_product_by_id(shopify_id: str, db: Session) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error finding product by ID {shopify_id}: {e}")
         return None
+
+def get_product_inventory_from_db(shopify_id: str, db: Session) -> int:
+    """FIXED: Get real inventory quantity for a product from database"""
+    try:
+        product = (
+            db.query(Product)
+            .options(joinedload(Product.variants))
+            .filter(Product.shopify_id == shopify_id)
+            .first()
+        )
+        
+        if not product:
+            return 0
+            
+        # Sum inventory from all variants
+        total_inventory = sum(v.inventory_quantity for v in product.variants)
+        return total_inventory
+        
+    except Exception as e:
+        logger.error(f"Error getting inventory for product {shopify_id}: {e}")
+        return 0
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
@@ -504,12 +544,26 @@ async def chat_endpoint(
             if target_product:
                 logger.info(f"HANDLING PRODUCT-SPECIFIC QUESTION: {product_question_analysis['question_type']} for {target_product['title']}")
                 
-                # Generate response for the specific target product
-                response_text = openai_service.generate_product_specific_response(
-                    target_product,
-                    chat_message.message,
-                    product_question_analysis['question_type']
-                )
+                # NEW: Handle image requests specifically
+                if product_question_analysis['question_type'] == 'images':
+                    if target_product.get('images') and len(target_product['images']) > 0:
+                        image_list = target_product['images']
+                        response_text = f"Here are the available images for **{target_product['title']}**:\n\n"
+                        
+                        for i, img in enumerate(image_list[:5], 1):  # Show up to 5 images
+                            response_text += f"**Image {i}:** {img['src']}\n"
+                        
+                        if len(image_list) > 5:
+                            response_text += f"\n*And {len(image_list) - 5} more images available.*"
+                    else:
+                        response_text = f"I don't have any images available for **{target_product['title']}** in our current database. You may want to visit the product page directly or contact customer service for visual information."
+                else:
+                    # Generate response for other product questions
+                    response_text = openai_service.generate_product_specific_response(
+                        target_product,
+                        chat_message.message,
+                        product_question_analysis['question_type']
+                    )
                 
                 # Update context to the target product
                 session_context[session_id]['context_product'] = target_product
@@ -628,7 +682,14 @@ async def chat_endpoint(
                         # FIXED: Format products for response with safe price handling
                         for product in db_products:
                             total_inventory = sum(v.inventory_quantity for v in product.variants)
-                            first_image = product.images[0] if product.images else None
+                            
+                            # FIXED: Include all images
+                            all_images = []
+                            for img in product.images:
+                                all_images.append({
+                                    "src": img.src,
+                                    "alt": img.alt_text or product.title
+                                })
 
                             variants_info = []
                             for variant in product.variants:
@@ -655,8 +716,8 @@ async def chat_endpoint(
                                 "tags": product.tags,
                                 "handle": product.handle,
                                 "status": product.status,
-                                "inventory_quantity": total_inventory,
-                                "images": [{"src": first_image.src, "alt": first_image.alt_text}] if first_image else [],
+                                "inventory_quantity": total_inventory,  # FIXED: Real inventory
+                                "images": all_images,  # FIXED: All images
                                 "variants_count": len(product.variants),
                                 "options_count": len(product.options),
                                 "variants": variants_info,
@@ -696,7 +757,7 @@ async def chat_endpoint(
                     # NEW: Store recent search products for position references
                     session_context[session_id]['recent_search_products'] = exact_matches
 
-                    # ENHANCED: Generate suggestions even if no exact matches
+                    # ENHANCED: Generate suggestions with FIXED inventory
                     # For suggestions, search for related products
                     suggestion_query = f"related to {search_query} alternative similar"
                     suggestion_results = vector_service.search_products(suggestion_query, limit=20)
@@ -712,6 +773,9 @@ async def chat_endpoint(
                         sid = normalize_shopify_id(payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id"))
                         
                         if sid and sid not in exact_match_ids:
+                            # FIXED: Get real inventory from database
+                            real_inventory = get_product_inventory_from_db(sid, db)
+                            
                             # Build suggestion product from payload with safe price conversion
                             img_src = None
                             if isinstance(payload.get("image"), dict):
@@ -743,7 +807,7 @@ async def chat_endpoint(
                                 "tags": payload.get("tags") or "",
                                 "handle": payload.get("handle"),
                                 "status": payload.get("status") or "active",
-                                "inventory_quantity": 0,
+                                "inventory_quantity": real_inventory,  # FIXED: Real inventory
                                 "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
                                 "variants_count": len(variants) if isinstance(variants, list) else 0,
                                 "options_count": len(payload.get("options") or []),
@@ -772,6 +836,7 @@ async def chat_endpoint(
                             suggested_questions = [
                                 "What colors are available?",
                                 "What sizes does this come in?",
+                                "Show me the images",
                                 "What's the price?",
                                 "Is there any discount?",
                             ]
@@ -830,6 +895,9 @@ async def chat_endpoint(
                         sid = normalize_shopify_id(payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id"))
                         
                         if sid:
+                            # FIXED: Get real inventory from database
+                            real_inventory = get_product_inventory_from_db(sid, db)
+                            
                             img_src = None
                             if isinstance(payload.get("image"), dict):
                                 img_src = payload["image"].get("src")
@@ -859,7 +927,7 @@ async def chat_endpoint(
                                 "tags": payload.get("tags") or "",
                                 "handle": payload.get("handle"),
                                 "status": payload.get("status") or "active",
-                                "inventory_quantity": 0,
+                                "inventory_quantity": real_inventory,  # FIXED: Real inventory
                                 "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
                                 "variants_count": len(variants) if isinstance(variants, list) else 0,
                                 "options_count": len(payload.get("options") or []),
@@ -1002,6 +1070,7 @@ def generate_smart_suggestions(product: Dict, last_question_type: str) -> List[s
     base_suggestions = [
         "Is this available in other colors?",
         "What sizes are available?", 
+        "Show me the images",  # NEW: Image suggestion
         "Tell me about the material",
         "Is there any discount on this?",
         "How much does this cost?",
@@ -1019,6 +1088,8 @@ def generate_smart_suggestions(product: Dict, last_question_type: str) -> List[s
         if last_question_type == "color" and ("color" in suggestion_lower):
             should_skip = True
         elif last_question_type == "size" and ("size" in suggestion_lower):
+            should_skip = True
+        elif last_question_type == "images" and ("image" in suggestion_lower):
             should_skip = True
         elif last_question_type == "material" and ("material" in suggestion_lower):
             should_skip = True

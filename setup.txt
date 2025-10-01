@@ -100,4 +100,29 @@ This will:
 
 If you see errors, check your `.env` and database connection settings.
 
+## 9. Setup Shopify Webhooks with ngrok
+
+To connect Shopify webhooks to your local backend using ngrok:
+
+1. Start ngrok to expose your FastAPI backend:
+   ```zsh
+   ngrok http 8000
+   ```
+   Copy the HTTPS URL provided by ngrok (e.g., `https://abc123.ngrok.io`).
+
+2. Register webhooks with your ngrok URL:
+   ```zsh
+   cd backend
+   python scripts/setup_webhooks.py https://abc123.ngrok.io
+   ```
+   (Replace with your actual ngrok URL)
+
+3. The script will automatically create all required Shopify webhooks pointing to your backend endpoints.
+
+4. You should see confirmation messages for each webhook created. If you need to list or delete webhooks, use:
+   ```zsh
+   python scripts/setup_webhooks.py list
+   python scripts/setup_webhooks.py delete
+   ```
+
 ---

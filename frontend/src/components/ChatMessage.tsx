@@ -1,7 +1,7 @@
 // File Path: /frontend/src/components/ChatMessage.tsx
 
 import React, { useState } from 'react';
-import { Bot, User, Clock, MessageSquare, Lightbulb, ChevronRight, Filter, Star } from 'lucide-react';
+import { Bot, User, Clock, MessageSquare, Lightbulb, ChevronRight, Filter, Star, Eye, EyeOff } from 'lucide-react';
 import ProductCard from './ProductCard';
 import OrderCard from './OrderCard';
 
@@ -50,6 +50,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const [showAllExact, setShowAllExact] = useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   const [activeProductNumber, setActiveProductNumber] = useState<number | null>(null);
+  const [showImagesAsText, setShowImagesAsText] = useState(false);
 
   const isBot = message.sender === 'bot';
   
@@ -69,6 +70,138 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       minute: '2-digit',
       hour12: true
     });
+  };
+
+  // NEW: Function to detect and extract image URLs from message
+  const extractImageUrls = (text: string): string[] => {
+    // Detect URLs in the format of **Image X:** URL
+    const imageUrlPattern = /\*\*Image \d+:\*\*\s*(https?:\/\/[^\s\n]+)/g;
+    const matches = [];
+    let match;
+    
+    while ((match = imageUrlPattern.exec(text)) !== null) {
+      matches.push(match[1]);
+    }
+    
+    return matches;
+  };
+
+  // NEW: Function to check if message contains product images
+  const containsProductImages = (text: string): boolean => {
+    return /Here are the available images for/.test(text) && 
+           /\*\*Image \d+:\*\*/.test(text);
+  };
+
+  // NEW: Render message content with image support
+  const renderMessageContent = (text: string) => {
+    if (!containsProductImages(text)) {
+      // Regular message - render as normal
+      return <div className="text-sm leading-relaxed whitespace-pre-wrap">{text}</div>;
+    }
+
+    // Extract product title and images
+    const titleMatch = text.match(/Here are the available images for \*\*(.*?)\*\*/);
+    const productTitle = titleMatch ? titleMatch[1] : 'this product';
+    const imageUrls = extractImageUrls(text);
+    
+    if (imageUrls.length === 0) {
+      return <div className="text-sm leading-relaxed whitespace-pre-wrap">{text}</div>;
+    }
+
+    return (
+      <div className="text-sm leading-relaxed">
+        <div className="mb-4">
+          <p className="font-medium text-gray-800 mb-2">
+            Here are the available images for <strong>{productTitle}</strong>:
+          </p>
+          
+          {/* Toggle button for image view */}
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => setShowImagesAsText(!showImagesAsText)}
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+            >
+              {showImagesAsText ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+              {showImagesAsText ? 'Show URLs' : 'Show Images'}
+            </button>
+            <span className="text-xs text-gray-500">
+              {imageUrls.length} image{imageUrls.length !== 1 ? 's' : ''} found
+            </span>
+          </div>
+
+          {showImagesAsText ? (
+            // Show as text URLs (original format)
+            <div className="space-y-1">
+              {imageUrls.map((url, index) => (
+                <div key={index} className="text-sm">
+                  <strong>Image {index + 1}:</strong>{' '}
+                  <a 
+                    href={url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline break-all"
+                  >
+                    {url}
+                  </a>
+                </div>
+              ))}
+            </div>
+          ) : (
+            // Show actual images
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {imageUrls.map((url, index) => (
+                <div key={index} className="relative group">
+                  <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+                    <img
+                      src={url}
+                      alt={`${productTitle} - Image ${index + 1}`}
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
+                      onError={(e) => {
+                        // Fallback if image fails to load
+                        e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMiA4VjE2TTggMTJIMTYiIHN0cm9rZT0iIzlDQTNBRiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHN2Zz4K';
+                        e.currentTarget.alt = 'Image failed to load';
+                      }}
+                    />
+                    
+                    {/* Image overlay with number */}
+                    <div className="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
+                      {index + 1}
+                    </div>
+                    
+                    {/* Click to view full size */}
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 cursor-pointer flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-white bg-opacity-90 rounded-full text-xs font-medium text-gray-700 hover:bg-opacity-100"
+                        >
+                          <Eye className="w-3 h-3" />
+                          View Full Size
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Image caption */}
+                  <p className="text-xs text-gray-600 mt-1 text-center">
+                    Image {index + 1} of {imageUrls.length}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Additional text after images */}
+          {text.includes('*And ') && (
+            <div className="mt-3 text-sm text-gray-600 italic">
+              {text.match(/\*And .*?\*/)?.[0]?.replace(/\*/g, '')}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // ENHANCED: Handle suggested question clicks with better context handling
@@ -132,10 +265,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               ? 'bg-white border border-gray-200 text-gray-800' 
               : 'bg-blue-500 text-white'
           }`}>
-            {/* Message Text */}
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">
-              {message.message}
-            </div>
+            {/* ENHANCED: Message Text with Image Support */}
+            {renderMessageContent(message.message)}
             
             {/* Timestamp and Context */}
             <div className="flex items-center mt-2 text-xs opacity-70">
@@ -205,7 +336,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                       {activeProductNumber === index + 1 && (
                         <div className="absolute top-8 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-48 z-20">
                           <div className="text-xs text-gray-500 mb-1">Quick questions:</div>
-                          {['What colors?', 'What sizes?', 'Price?', 'Similar products?'].map((question) => (
+                          {['What colors?', 'What sizes?', 'Show me images', 'Price?', 'Similar products?'].map((question) => (
                             <button
                               key={question}
                               onClick={() => handleQuickQuestion(index + 1, question)}
@@ -353,6 +484,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                   <div>Selected ID: {selectedProductId || 'None'}</div>
                   <div>Exact Matches: {exactMatches.length}</div>
                   <div>Suggestions: {suggestions.length}</div>
+                  <div>Contains Images: {containsProductImages(message.message) ? 'Yes' : 'No'}</div>
                 </div>
               )}
             </div>
