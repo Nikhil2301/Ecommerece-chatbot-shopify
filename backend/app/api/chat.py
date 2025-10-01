@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
 import json
 import logging
@@ -52,6 +52,36 @@ class ChatResponse(BaseModel):
     applied_filters: Optional[Dict] = {}
     search_metadata: Optional[Dict] = {}
 
+def safe_float_convert(value: Union[str, int, float, None]) -> float:
+    """Safely convert a value to float, return 0.0 if conversion fails"""
+    if value is None:
+        return 0.0
+    
+    try:
+        # Handle string values
+        if isinstance(value, str):
+            # Remove currency symbols and spaces
+            cleaned = re.sub(r'[^\d.,]', '', value)
+            if not cleaned:
+                return 0.0
+            # Handle comma as decimal separator
+            cleaned = cleaned.replace(',', '.')
+            return float(cleaned)
+        
+        return float(value)
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert price value to float: {value}")
+        return 0.0
+
+def normalize_shopify_id(raw_id: Optional[str]) -> Optional[str]:
+    """FIXED: Move this function to module level to avoid scoping issues"""
+    if not raw_id:
+        return None
+    s = str(raw_id)
+    if s.startswith("gid://shopify/Product/"):
+        return s.rsplit("/", 1)[-1]
+    return s
+
 def parse_user_preferences(message: str) -> Dict:
     """Parse user message for specific preferences like count, price, etc."""
     preferences = {
@@ -60,7 +90,8 @@ def parse_user_preferences(message: str) -> Dict:
         'brand_filter': None,
         'color_filter': None,
         'size_filter': None,
-        'show_similar_to_id': None
+        'show_similar_to_id': None,
+        'product_position_reference': None,  # NEW: For "second product", "third one", etc.
     }
     
     # Parse quantity requests
@@ -77,13 +108,16 @@ def parse_user_preferences(message: str) -> Dict:
             preferences['max_results'] = int(match.group(1))
             break
     
-    # Parse price filters
+    # ENHANCED: Parse price filters with more patterns
     price_patterns = [
         r'under\s+\$?(\d+)',
         r'less\s+than\s+\$?(\d+)',
         r'below\s+\$?(\d+)',
         r'cheaper\s+than\s+\$?(\d+)',
-        r'budget\s+of\s+\$?(\d+)'
+        r'budget\s+of\s+\$?(\d+)',
+        r'under\s+(\d+)\s*(?:rs|rupees?)',
+        r'below\s+(\d+)\s*(?:rs|rupees?)',
+        r'less\s+than\s+(\d+)\s*(?:rs|rupees?)'
     ]
     
     for pattern in price_patterns:
@@ -102,20 +136,48 @@ def parse_user_preferences(message: str) -> Dict:
     if similar_match:
         preferences['show_similar_to_id'] = int(similar_match.group(1))
     
+    # NEW: Parse product position references (second product, third one, etc.)
+    position_patterns = [
+        r'(?:the\s+)?(first|second|third|fourth|fifth|\d+(?:st|nd|rd|th)?)\s+(?:product|one|item)',
+        r'product\s+(?:#|number\s+)?(\d+)',
+        r'(?:the\s+)?(?:first|second|third|fourth|fifth|\d+(?:st|nd|rd|th)?)\s+(?:one|item)',
+    ]
+    
+    for pattern in position_patterns:
+        match = re.search(pattern, message.lower())
+        if match:
+            position_text = match.group(1) if match.group(1) else match.group(0)
+            # Convert ordinal to number
+            ordinal_map = {
+                'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+                '1st': 1, '2nd': 2, '3rd': 3, '4th': 4, '5th': 5
+            }
+            
+            if position_text in ordinal_map:
+                preferences['product_position_reference'] = ordinal_map[position_text]
+            elif position_text.isdigit():
+                preferences['product_position_reference'] = int(position_text)
+            break
+    
     return preferences
 
 def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
-    """Apply filters to product list"""
+    """FIXED: Apply filters to product list with safe price conversion"""
     if not filters:
         return products
     
     filtered = products
     
-    # Price filter
+    # Price filter with safe conversion
     if 'price_filter' in filters and filters['price_filter']:
         max_price = filters['price_filter'].get('max')
         if max_price:
-            filtered = [p for p in filtered if p.get('price', 0) <= max_price]
+            max_price = float(max_price)  # Ensure max_price is float
+            filtered = []
+            for p in filtered:
+                product_price = safe_float_convert(p.get('price', 0))
+                if product_price <= max_price:
+                    filtered.append(p)
     
     # Brand filter
     if 'brand_filter' in filters and filters['brand_filter']:
@@ -123,6 +185,213 @@ def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
         filtered = [p for p in filtered if brand in (p.get('vendor', '') or '').lower()]
     
     return filtered
+
+def detect_product_specific_question(message: str, context_product: Optional[Dict] = None, 
+                                   recent_products: List[Dict] = None, selected_product: Optional[Dict] = None) -> Dict:
+    """COMPLETELY FIXED: Better detection of product-specific questions"""
+    
+    message_lower = message.lower()
+    logger.info(f"Analyzing question: '{message}' (lowercased: '{message_lower}')")
+    
+    # ENHANCED: Much more comprehensive product question patterns
+    product_question_patterns = [
+        # Color questions
+        r'(?:what|which)\s+colors?\s+(?:are\s+)?(?:available|exist|does\s+(?:this|it)\s+come\s+in)',
+        r'(?:give\s+me\s+)?which\s+colors?\s+(?:are\s+)?available',
+        r'(?:tell\s+me\s+)?(?:the\s+)?(?:available\s+)?colors?',
+        r'(?:in\s+)?(?:what|which)\s+colors?\s+(?:is\s+)?(?:it\s+)?(?:available|come)',
+        r'colors?\s+available',
+        r'available\s+colors?',
+        
+        # Size questions  
+        r'(?:what|which)\s+sizes?\s+(?:are\s+)?(?:available|exist|does\s+(?:this|it)\s+come\s+in)',
+        r'(?:give\s+me\s+)?which\s+sizes?\s+(?:are\s+)?available',
+        r'(?:tell\s+me\s+)?(?:the\s+)?(?:available\s+)?sizes?',
+        r'(?:what|which)\s+sizes?\s+(?:is\s+)?(?:it\s+)?(?:available|come)',
+        r'sizes?\s+available',
+        r'available\s+sizes?',
+        r'please\s+provide\s+(?:the\s+)?(?:all\s+)?sizes?',
+        r'give\s+me\s+(?:all\s+)?(?:the\s+)?(?:available\s+)?sizes?',
+        
+        # General product questions
+        r'tell\s+me\s+about\s+(?:the\s+)?(?:this\s+)?(?:product|item)',
+        r'(?:what\s+about\s+)?(?:this\s+)?(?:product|item)',
+        r'is\s+there\s+(?:any\s+)?discount\s+on\s+(?:this|it)',
+        r'how\s+much\s+(?:does\s+)?(?:this|it)\s+cost',
+        r'what\'?s\s+the\s+price',
+        r'is\s+(?:this|it)\s+in\s+stock',
+        r'(?:what|which)\s+options\s+(?:are\s+)?available',
+        r'tell\s+me\s+more\s+(?:about\s+)?(?:this|it)',
+        
+        # Enhanced with selection context
+        r'(?:give\s+me\s+)?(?:which\s+)?colors?\s+(?:are\s+)?available\s+(?:of\s+|for\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
+        r'(?:give\s+me\s+)?(?:which\s+)?sizes?\s+(?:are\s+)?available\s+(?:of\s+|for\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
+        r'(?:tell\s+me\s+about\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected',
+        r'(?:what\s+about\s+)?(?:the\s+)?(?:product\s+)?(?:i\s+)?selected'
+    ]
+    
+    # Check for product position references
+    target_product = None
+    has_product_reference = False
+    question_type = "general"
+    
+    # Check for position-based references first
+    position_patterns = [
+        r'(?:the\s+)?(first|second|third|fourth|fifth|\d+(?:st|nd|rd|th)?)\s+(?:product|one|item)',
+        r'product\s+(?:#|number\s+)?(\d+)',
+        r'(?:the\s+)?(?:first|second|third|fourth|fifth|\d+(?:st|nd|rd|th)?)\s+(?:one|item)',
+    ]
+    
+    for pattern in position_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            position_text = match.group(1) if match.groups() and match.group(1) else match.group(0).split()[-2]
+            ordinal_map = {
+                'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+                '1st': 1, '2nd': 2, '3rd': 3, '4th': 4, '5th': 5
+            }
+            
+            position = None
+            if position_text in ordinal_map:
+                position = ordinal_map[position_text]
+            elif position_text.isdigit():
+                position = int(position_text)
+            
+            if position and recent_products and len(recent_products) >= position:
+                target_product = recent_products[position - 1]
+                has_product_reference = True
+                logger.info(f"Found position reference: position {position} -> {target_product.get('title', 'Unknown')}")
+                break
+    
+    # PRIORITY FIX: If no position reference, check selected product FIRST
+    if not target_product and selected_product:
+        target_product = selected_product
+        has_product_reference = True
+        logger.info(f"Using selected product: {target_product.get('title', 'Unknown')}")
+    
+    # If still no target, use context product
+    if not target_product and context_product:
+        target_product = context_product
+        
+        # Check for product name mentions
+        product_title = context_product['title'].lower()
+        product_words = product_title.split()
+        
+        # Check if any significant words from product title are in the message
+        for word in product_words:
+            if len(word) > 3 and word in message_lower:
+                has_product_reference = True
+                break
+        
+        # Check for "for [product name]" pattern
+        if re.search(rf'for\s+["\']?{re.escape(product_title)}["\']?', message_lower):
+            has_product_reference = True
+            
+        # Check for partial product title matches
+        product_words_filtered = [w for w in product_words if len(w) > 3]
+        if len(product_words_filtered) > 0:
+            # Check if at least 50% of significant words are in the message
+            matches = sum(1 for word in product_words_filtered if word in message_lower)
+            if matches >= len(product_words_filtered) * 0.5:
+                has_product_reference = True
+    
+    # ENHANCED: Check for product question patterns with better logging
+    is_product_question = False
+    for i, pattern in enumerate(product_question_patterns):
+        if re.search(pattern, message_lower):
+            is_product_question = True
+            logger.info(f"Matched product question pattern {i+1}: {pattern}")
+            
+            # Determine question type
+            if 'color' in message_lower:
+                question_type = "color"
+            elif 'size' in message_lower:
+                question_type = "size"
+            elif 'material' in message_lower:
+                question_type = "material"
+            elif 'discount' in message_lower:
+                question_type = "discount"
+            elif 'price' in message_lower or 'cost' in message_lower:
+                question_type = "price"
+            elif 'stock' in message_lower or 'available' in message_lower:
+                question_type = "availability"
+            elif 'option' in message_lower:
+                question_type = "options"
+            
+            break
+    
+    # CRITICAL FIX: If we have a target product but no question pattern match, 
+    # still treat it as a product question if it sounds like one
+    if not is_product_question and target_product:
+        # Check for simple keywords that indicate product questions
+        product_keywords = ['color', 'size', 'available', 'price', 'cost', 'discount', 'stock', 'option', 'material']
+        if any(keyword in message_lower for keyword in product_keywords):
+            is_product_question = True
+            logger.info("Detected product question based on keywords and target product presence")
+    
+    result = {
+        'is_product_question': is_product_question,
+        'question_type': question_type,
+        'has_product_reference': has_product_reference,
+        'should_use_context': is_product_question and target_product is not None,
+        'target_product': target_product
+    }
+    
+    logger.info(f"Question analysis result: {result}")
+    return result
+
+def find_product_by_id(shopify_id: str, db: Session) -> Optional[Dict]:
+    """Helper function to find a product by its shopify_id"""
+    try:
+        product = (
+            db.query(Product)
+            .options(joinedload(Product.images), joinedload(Product.variants), joinedload(Product.options))
+            .filter(Product.shopify_id == shopify_id)
+            .first()
+        )
+        
+        if not product:
+            return None
+            
+        # Format product for response with safe price conversion
+        total_inventory = sum(v.inventory_quantity for v in product.variants)
+        first_image = product.images[0] if product.images else None
+
+        variants_info = []
+        for variant in product.variants:
+            variants_info.append({
+                "title": variant.title,
+                "price": safe_float_convert(variant.price),
+                "compare_at_price": safe_float_convert(variant.compare_at_price) if variant.compare_at_price else None,
+                "inventory_quantity": variant.inventory_quantity,
+                "sku": variant.sku,
+                "option1": variant.option1,
+                "option2": variant.option2,
+                "option3": variant.option3,
+            })
+
+        return {
+            "id": product.id,
+            "shopify_id": product.shopify_id,
+            "title": product.title,
+            "description": product.description,
+            "price": safe_float_convert(product.price),
+            "compare_at_price": safe_float_convert(product.compare_at_price) if product.compare_at_price else None,
+            "vendor": product.vendor,
+            "product_type": product.product_type,
+            "tags": product.tags,
+            "handle": product.handle,
+            "status": product.status,
+            "inventory_quantity": total_inventory,
+            "images": [{"src": first_image.src, "alt": first_image.alt_text}] if first_image else [],
+            "variants_count": len(product.variants),
+            "options_count": len(product.options),
+            "variants": variants_info,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error finding product by ID {shopify_id}: {e}")
+        return None
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
@@ -144,7 +413,25 @@ async def chat_endpoint(
                 'last_shown_products': [],
                 'context_product': None,
                 'numbered_products': {},  # Track products by number for "show me more like #2"
+                'recent_search_products': [],  # NEW: Track recent search results for position references
+                'selected_product': None,  # NEW: Track currently selected product
             }
+
+        # ENHANCED: Handle selected product ID from frontend
+        selected_product = None
+        if chat_message.selected_product_id:
+            logger.info(f"Frontend sent selected product ID: {chat_message.selected_product_id}")
+            
+            # Always update the selected product context when frontend sends it
+            session_context[session_id]['selected_product_id'] = chat_message.selected_product_id
+            
+            # Update context product when selection changes
+            new_context_product = find_product_by_id(chat_message.selected_product_id, db)
+            if new_context_product:
+                session_context[session_id]['context_product'] = new_context_product
+                session_context[session_id]['selected_product'] = new_context_product  # NEW: Store selected product
+                selected_product = new_context_product
+                logger.info(f"Updated context product to: {new_context_product['title']}")
 
         # Parse user preferences
         user_preferences = parse_user_preferences(chat_message.message)
@@ -161,11 +448,30 @@ async def chat_endpoint(
         if len(session_context[session_id]['conversation_history']) > 10:
             session_context[session_id]['conversation_history'] = session_context[session_id]['conversation_history'][-10:]
 
+        # ENHANCED: Better product question detection with recent products and selected product
+        context_product = session_context[session_id].get('context_product')
+        recent_products = session_context[session_id].get('recent_search_products', [])
+        selected_product = session_context[session_id].get('selected_product')
+        
+        logger.info(f"Context for question detection:")
+        logger.info(f"  - Context product: {context_product.get('title') if context_product else 'None'}")
+        logger.info(f"  - Selected product: {selected_product.get('title') if selected_product else 'None'}")
+        logger.info(f"  - Recent products count: {len(recent_products) if recent_products else 0}")
+        
+        product_question_analysis = detect_product_specific_question(
+            chat_message.message, 
+            context_product, 
+            recent_products, 
+            selected_product
+        )
+        
+        logger.info(f"Product question analysis: {product_question_analysis}")
+
         # Intent analysis with conversation context
         intent_analysis = openai_service.analyze_user_intent_with_context(
             chat_message.message,
             session_context[session_id]['conversation_history'],
-            session_context[session_id].get('context_product')
+            context_product
         )
 
         intent = intent_analysis.get("intent", "GENERAL_CHAT")
@@ -176,7 +482,6 @@ async def chat_endpoint(
         exact_matches = []
         suggestions = []
         orders = None
-        context_product = session_context[session_id].get('context_product')
         show_exact_slider = False
         show_suggestions_slider = False
         suggested_questions = []
@@ -192,7 +497,45 @@ async def chat_endpoint(
 
         logger.info(f"Intent: {intent}, Preferences: {user_preferences}")
 
-        if intent == "PRODUCT_SEARCH":
+        # PRIORITY FIX: Handle product-specific questions FIRST, before other intents
+        if product_question_analysis['is_product_question'] and product_question_analysis['should_use_context']:
+            target_product = product_question_analysis.get('target_product')
+            
+            if target_product:
+                logger.info(f"HANDLING PRODUCT-SPECIFIC QUESTION: {product_question_analysis['question_type']} for {target_product['title']}")
+                
+                # Generate response for the specific target product
+                response_text = openai_service.generate_product_specific_response(
+                    target_product,
+                    chat_message.message,
+                    product_question_analysis['question_type']
+                )
+                
+                # Update context to the target product
+                session_context[session_id]['context_product'] = target_product
+                context_product = target_product
+                
+                show_exact_slider = False
+                show_suggestions_slider = False
+                exact_matches = []
+                suggestions = []
+                
+                # Generate smart suggestions that avoid the just-asked question
+                suggested_questions = generate_smart_suggestions(target_product, product_question_analysis['question_type'])
+            else:
+                # No target product found - ask for clarification
+                if recent_products and len(recent_products) > 0:
+                    response_text = f"I found {len(recent_products)} products in our recent results. Could you please specify which product you're asking about? For example, say 'the first product' or 'the second one'."
+                else:
+                    response_text = "I'd be happy to help you with product information! Could you please select a product first or tell me which specific product you're interested in?"
+                
+                suggested_questions = [
+                    "Show me some products",
+                    "Tell me about the first product",
+                    "What products do you have?"
+                ]
+
+        elif intent == "PRODUCT_SEARCH":
             keywords = extracted_info.get("keywords", [])
             is_followup = extracted_info.get("is_followup_question", False)
             question_type = extracted_info.get("question_type", "general")
@@ -211,22 +554,41 @@ async def chat_endpoint(
                 else:
                     response_text = f"I couldn't find product #{target_id} from our recent results. Please try a new search."
                     search_query = " ".join(keywords) if keywords else chat_message.message
-            elif is_followup and context_product and question_type in ["price", "discount", "size", "availability", "color", "material", "fabric", "options"]:
-                # Handle follow-up questions (existing logic)
-                logger.info(f"Handling follow-up question about {context_product.get('title')} - {question_type}")
+            
+            # NEW: Handle position-based product references
+            elif user_preferences.get('product_position_reference'):
+                position = user_preferences['product_position_reference']
+                recent_products = session_context[session_id].get('recent_search_products', [])
                 
-                response_text = openai_service.generate_product_specific_response(
-                    context_product,
-                    chat_message.message,
-                    question_type
-                )
-                
-                show_exact_slider = False
-                show_suggestions_slider = False
-                exact_matches = []
-                suggestions = []
-                
-                suggested_questions = generate_smart_suggestions(context_product, question_type)
+                if recent_products and len(recent_products) >= position:
+                    target_product = recent_products[position - 1]
+                    
+                    # Update context to this product
+                    session_context[session_id]['context_product'] = target_product
+                    context_product = target_product
+                    
+                    # Generate response about this specific product
+                    response_text = openai_service.generate_product_specific_response(
+                        target_product,
+                        chat_message.message,
+                        "general"
+                    )
+                    
+                    # Show this product as the main result
+                    exact_matches = [target_product]
+                    show_exact_slider = True
+                    show_suggestions_slider = False
+                    
+                    suggested_questions = [
+                        "What colors are available?",
+                        "What sizes does this come in?",
+                        "What's the price?",
+                        "Is there any discount?",
+                    ]
+                else:
+                    response_text = f"I couldn't find a product at position {position} from the recent results. Please try a new search."
+                    search_query = " ".join(keywords) if keywords else chat_message.message
+            
             else:
                 # New product search
                 search_query = " ".join(keywords) if keywords else chat_message.message
@@ -243,22 +605,14 @@ async def chat_endpoint(
                     # Process results into exact matches
                     all_products = []
                     
-                    # Extract and normalize product data
-                    def _normalize_shopify_id(raw_id: Optional[str]) -> Optional[str]:
-                        if not raw_id:
-                            return None
-                        s = str(raw_id)
-                        if s.startswith("gid://shopify/Product/"):
-                            return s.rsplit("/", 1)[-1]
-                        return s
-
+                    # FIXED: Use the module-level normalize function
                     product_ids: List[str] = []
                     for p in product_results:
                         if not isinstance(p, dict):
                             continue
                         payload = p.get("product") if "product" in p else p
                         sid = payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id")
-                        sid = _normalize_shopify_id(sid)
+                        sid = normalize_shopify_id(sid)
                         if sid:
                             product_ids.append(sid)
 
@@ -271,7 +625,7 @@ async def chat_endpoint(
                             .all()
                         )
 
-                        # Format products for response
+                        # FIXED: Format products for response with safe price handling
                         for product in db_products:
                             total_inventory = sum(v.inventory_quantity for v in product.variants)
                             first_image = product.images[0] if product.images else None
@@ -280,8 +634,8 @@ async def chat_endpoint(
                             for variant in product.variants:
                                 variants_info.append({
                                     "title": variant.title,
-                                    "price": variant.price,
-                                    "compare_at_price": variant.compare_at_price,
+                                    "price": safe_float_convert(variant.price),
+                                    "compare_at_price": safe_float_convert(variant.compare_at_price) if variant.compare_at_price else None,
                                     "inventory_quantity": variant.inventory_quantity,
                                     "sku": variant.sku,
                                     "option1": variant.option1,
@@ -294,8 +648,8 @@ async def chat_endpoint(
                                 "shopify_id": product.shopify_id,
                                 "title": product.title,
                                 "description": product.description,
-                                "price": product.price,
-                                "compare_at_price": product.compare_at_price,
+                                "price": safe_float_convert(product.price),
+                                "compare_at_price": safe_float_convert(product.compare_at_price) if product.compare_at_price else None,
                                 "vendor": product.vendor,
                                 "product_type": product.product_type,
                                 "tags": product.tags,
@@ -338,75 +692,79 @@ async def chat_endpoint(
                     for i, product in enumerate(exact_matches, 1):
                         numbered_products[i] = product
                     session_context[session_id]['numbered_products'] = numbered_products
+                    
+                    # NEW: Store recent search products for position references
+                    session_context[session_id]['recent_search_products'] = exact_matches
 
-                    # Generate suggestions (different products that might interest user)
-                    if exact_matches and len(exact_matches) > 0:
-                        # For suggestions, search for related but different products
-                        suggestion_query = f"related to {search_query} alternative similar"
-                        suggestion_results = vector_service.search_products(suggestion_query, limit=20)
+                    # ENHANCED: Generate suggestions even if no exact matches
+                    # For suggestions, search for related products
+                    suggestion_query = f"related to {search_query} alternative similar"
+                    suggestion_results = vector_service.search_products(suggestion_query, limit=20)
+                    
+                    # Filter out exact matches from suggestions (if any)
+                    exact_match_ids = set(p['shopify_id'] for p in exact_matches) if exact_matches else set()
+                    
+                    suggestion_products = []
+                    for result in suggestion_results:
+                        if not isinstance(result, dict):
+                            continue
+                        payload = result.get("product") if "product" in result else result
+                        sid = normalize_shopify_id(payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id"))
                         
-                        # Filter out exact matches from suggestions
-                        exact_match_ids = set(p['shopify_id'] for p in exact_matches)
-                        
-                        suggestion_products = []
-                        for result in suggestion_results:
-                            if not isinstance(result, dict):
-                                continue
-                            payload = result.get("product") if "product" in result else result
-                            sid = _normalize_shopify_id(payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id"))
-                            
-                            if sid and sid not in exact_match_ids:
-                                # Build suggestion product from payload
-                                img_src = None
-                                if isinstance(payload.get("image"), dict):
-                                    img_src = payload["image"].get("src")
-                                elif payload.get("images") and isinstance(payload["images"], list) and payload["images"]:
-                                    first_img = payload["images"][0]
-                                    if isinstance(first_img, dict):
-                                        img_src = first_img.get("src")
+                        if sid and sid not in exact_match_ids:
+                            # Build suggestion product from payload with safe price conversion
+                            img_src = None
+                            if isinstance(payload.get("image"), dict):
+                                img_src = payload["image"].get("src")
+                            elif payload.get("images") and isinstance(payload["images"], list) and payload["images"]:
+                                first_img = payload["images"][0]
+                                if isinstance(first_img, dict):
+                                    img_src = first_img.get("src")
 
-                                price_val = None
-                                variants = payload.get("variants") or []
-                                if isinstance(variants, list) and variants:
-                                    v0 = variants[0]
-                                    if isinstance(v0, dict):
-                                        price_val = v0.get("price") or v0.get("compare_at_price")
-                                if price_val is None:
-                                    price_val = payload.get("price")
+                            # Safe price extraction
+                            price_val = None
+                            variants = payload.get("variants") or []
+                            if isinstance(variants, list) and variants:
+                                v0 = variants[0]
+                                if isinstance(v0, dict):
+                                    price_val = v0.get("price") or v0.get("compare_at_price")
+                            if price_val is None:
+                                price_val = payload.get("price")
 
-                                suggestion_products.append({
-                                    "id": sid,
-                                    "shopify_id": sid,
-                                    "title": payload.get("title") or "Product",
-                                    "description": payload.get("description") or payload.get("body_html") or "",
-                                    "price": price_val or 0,
-                                    "compare_at_price": None,
-                                    "vendor": payload.get("vendor") or "",
-                                    "product_type": payload.get("product_type") or "",
-                                    "tags": payload.get("tags") or "",
-                                    "handle": payload.get("handle"),
-                                    "status": payload.get("status") or "active",
-                                    "inventory_quantity": 0,
-                                    "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
-                                    "variants_count": len(variants) if isinstance(variants, list) else 0,
-                                    "options_count": len(payload.get("options") or []),
-                                    "variants": [],
-                                })
-                        
-                        # Apply same filters to suggestions
-                        suggestions = apply_product_filters(suggestion_products, filters_to_apply)[:5]
-                        total_suggestions = len(suggestions)
+                            suggestion_products.append({
+                                "id": sid,
+                                "shopify_id": sid,
+                                "title": payload.get("title") or "Product",
+                                "description": payload.get("description") or payload.get("body_html") or "",
+                                "price": safe_float_convert(price_val),
+                                "compare_at_price": None,
+                                "vendor": payload.get("vendor") or "",
+                                "product_type": payload.get("product_type") or "",
+                                "tags": payload.get("tags") or "",
+                                "handle": payload.get("handle"),
+                                "status": payload.get("status") or "active",
+                                "inventory_quantity": 0,
+                                "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
+                                "variants_count": len(variants) if isinstance(variants, list) else 0,
+                                "options_count": len(payload.get("options") or []),
+                                "variants": [],
+                            })
+                    
+                    # Apply same filters to suggestions
+                    suggestions = apply_product_filters(suggestion_products, filters_to_apply)[:5]
+                    total_suggestions = len(suggestions)
 
                     # Store context for follow-up questions
                     session_context[session_id]['product_ids'] = [p['shopify_id'] for p in exact_matches]
                     session_context[session_id]['last_shown_products'] = exact_matches
 
-                    # Set context product to first result for follow-ups
+                    # ENHANCED: Set context product to first result for follow-ups
                     if exact_matches:
                         context_product = exact_matches[0]
                         session_context[session_id]['context_product'] = context_product
+                        logger.info(f"Set new context product: {context_product['title']}")
 
-                    # Generate dynamic response based on results
+                    # ENHANCED: Generate dynamic response based on results
                     if user_preferences.get('max_results') == 1:
                         if exact_matches:
                             response_text = f"Here's the product that matches your search: **{exact_matches[0]['title']}**"
@@ -418,10 +776,10 @@ async def chat_endpoint(
                                 "Is there any discount?",
                             ]
                         else:
-                            response_text = "I couldn't find exactly what you're looking for. Here are some related suggestions:"
+                            response_text = "I couldn't find exactly what you're looking for, but here are some related suggestions:"
                             show_suggestions_slider = len(suggestions) > 0
                     elif total_exact_matches == 0:
-                        response_text = "I couldn't find exact matches for your search. Here are some related suggestions:"
+                        response_text = "I couldn't find exact matches for your search, but here are some related suggestions you might like:"
                         show_suggestions_slider = len(suggestions) > 0
                     elif total_exact_matches == 1:
                         response_text = f"I found 1 product that matches your search: **{exact_matches[0]['title']}**"
@@ -457,18 +815,68 @@ async def chat_endpoint(
                     }
 
                 else:
-                    response_text = "I couldn't find any products matching your search. Could you try different keywords or be more specific?"
+                    # ENHANCED: No results found - generate alternative suggestions
+                    response_text = "I couldn't find any products matching your search. Let me show you some other products you might like:"
+                    
+                    # Try a broader search for suggestions
+                    general_query = "popular products"
+                    general_results = vector_service.search_products(general_query, limit=10)
+                    
+                    suggestion_products = []
+                    for result in general_results:
+                        if not isinstance(result, dict):
+                            continue
+                        payload = result.get("product") if "product" in result else result
+                        sid = normalize_shopify_id(payload.get("shopify_id") or payload.get("shopifyId") or payload.get("id"))
+                        
+                        if sid:
+                            img_src = None
+                            if isinstance(payload.get("image"), dict):
+                                img_src = payload["image"].get("src")
+                            elif payload.get("images") and isinstance(payload["images"], list) and payload["images"]:
+                                first_img = payload["images"][0]
+                                if isinstance(first_img, dict):
+                                    img_src = first_img.get("src")
+
+                            price_val = None
+                            variants = payload.get("variants") or []
+                            if isinstance(variants, list) and variants:
+                                v0 = variants[0]
+                                if isinstance(v0, dict):
+                                    price_val = v0.get("price") or v0.get("compare_at_price")
+                            if price_val is None:
+                                price_val = payload.get("price")
+
+                            suggestion_products.append({
+                                "id": sid,
+                                "shopify_id": sid,
+                                "title": payload.get("title") or "Product",
+                                "description": payload.get("description") or payload.get("body_html") or "",
+                                "price": safe_float_convert(price_val),
+                                "compare_at_price": None,
+                                "vendor": payload.get("vendor") or "",
+                                "product_type": payload.get("product_type") or "",
+                                "tags": payload.get("tags") or "",
+                                "handle": payload.get("handle"),
+                                "status": payload.get("status") or "active",
+                                "inventory_quantity": 0,
+                                "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
+                                "variants_count": len(variants) if isinstance(variants, list) else 0,
+                                "options_count": len(payload.get("options") or []),
+                                "variants": [],
+                            })
+                    
+                    suggestions = suggestion_products[:5]
+                    show_suggestions_slider = len(suggestions) > 0
                     exact_matches = []
-                    suggestions = []
                     show_exact_slider = False
-                    show_suggestions_slider = False
                     
                     suggested_questions = [
                         "Show me shirts",
                         "Find me a dress",
                         "Show me shoes",
                         "What's on sale?",
-                        "Show me new arrivals"
+                        "Show me popular products"
                     ]
 
         elif intent == "ORDER_INQUIRY":
@@ -544,6 +952,7 @@ async def chat_endpoint(
         }
         session_context[session_id]['conversation_history'].append(bot_msg)
 
+        # ENHANCED: Always return the current context product in response
         return ChatResponse(
             response=response_text,
             intent=intent,
@@ -551,7 +960,7 @@ async def chat_endpoint(
             exact_matches=exact_matches if show_exact_slider else [],
             suggestions=suggestions if show_suggestions_slider else [],
             orders=orders,
-            context_product=context_product,
+            context_product=context_product,  # Always include current context
             show_exact_slider=show_exact_slider,
             show_suggestions_slider=show_suggestions_slider,
             suggested_questions=suggested_questions,
@@ -576,6 +985,7 @@ async def chat_endpoint(
             exact_matches=[],
             suggestions=[],
             orders=None,
+            context_product=None,
             show_exact_slider=False,
             show_suggestions_slider=False,
             total_exact_matches=0,
@@ -596,7 +1006,8 @@ def generate_smart_suggestions(product: Dict, last_question_type: str) -> List[s
         "Is there any discount on this?",
         "How much does this cost?",
         "Is this in stock?",
-        "Show me similar products"
+        "Show me similar products",
+        "What options are available?"
     ]
 
     # Remove the question type they just asked about
@@ -616,6 +1027,8 @@ def generate_smart_suggestions(product: Dict, last_question_type: str) -> List[s
         elif last_question_type == "price" and ("cost" in suggestion_lower):
             should_skip = True
         elif last_question_type == "availability" and ("stock" in suggestion_lower):
+            should_skip = True
+        elif last_question_type == "options" and ("option" in suggestion_lower):
             should_skip = True
         
         if not should_skip:

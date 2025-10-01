@@ -1,7 +1,7 @@
-// # File Path: /Users/nikhil/Sites/localhost/22-sep-11-12-Ai-Ecommerce-Chatbot/frontend/src/hooks/useChat.ts
+// File Path: /frontend/src/hooks/useChat.ts
 
 import { useState, useCallback, useMemo } from 'react';
-import { ChatMessage, EnhancedChatResponse } from '@/types';
+import { ChatMessage, ChatResponse } from '@/types';
 import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
@@ -51,17 +51,24 @@ export const useChat = () => {
     setError(null);
 
     try {
-      // Enhanced context-aware chat request
-      const response: EnhancedChatResponse = await sendChatMessage(
+      console.log('=== SENDING MESSAGE ===');
+      console.log('Message:', message);
+      console.log('Selected Product ID:', selectedProductId);
+      console.log('Session ID:', sessionId);
+      
+      // ENHANCED: Always send selected product ID to backend
+      const response: ChatResponse = await sendChatMessage(
         message,
         email,
         sessionId,
-        selectedProductId,
+        selectedProductId, // CRITICAL: Always send this
         conversationHistory,
         maxResults,
         filters,
         pageNumber
       );
+
+      console.log('Response received:', response);
 
       // Handle enhanced response with dual sliders
       const exactMatches: any[] = response.exact_matches || [];
@@ -94,10 +101,10 @@ export const useChat = () => {
 
       setMessages(prev => [...prev, botMessage]);
 
-      // Update context product if provided
+      // ENHANCED: Update context product if provided in response
       if (response.context_product) {
         setContextProduct(response.context_product);
-        setSelectedProductId(response.context_product.shopify_id);
+        console.log('Updated context product from response:', response.context_product.title);
       }
 
       // Update conversation history
@@ -108,10 +115,11 @@ export const useChat = () => {
       ];
       setConversationHistory(newHistory);
 
-      // Auto-select first product if no current selection and products available
+      // ENHANCED: Auto-select first product if no current selection and products available
       if (!selectedProductId && exactMatches && exactMatches.length > 0) {
         const first = exactMatches[0];
         if (first && first.shopify_id) {
+          console.log('Auto-selecting first product:', first.title);
           setSelectedProductId(first.shopify_id);
           setContextProduct(first);
         }
@@ -154,10 +162,16 @@ export const useChat = () => {
     await sendMessage(enhancedQuery);
   }, [sendMessage]);
 
+  // ENHANCED: Better product selection with context update
   const selectProduct = useCallback((productId: string) => {
+    console.log('=== SELECTING PRODUCT ===');
+    console.log('Product ID:', productId);
+    console.log('Previous selected ID:', selectedProductId);
+    
     setSelectedProductId(productId);
     
     // Find the product in recent messages to set context
+    let foundProduct = null;
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       
@@ -168,18 +182,31 @@ export const useChat = () => {
         ...(msg.products || []) // Fallback for old format
       ];
       
-      const foundProduct = allProducts.find((p: any) => p.shopify_id === productId);
+      foundProduct = allProducts.find((p: any) => p.shopify_id === productId);
       if (foundProduct) {
+        console.log('Found and setting context product:', foundProduct.title);
         setContextProduct(foundProduct);
         break;
       }
     }
-  }, [messages]);
 
-  const sendSuggestedQuestion = useCallback(async (question: string) => {
-    // Use the suggested question as if user typed it
+    if (!foundProduct) {
+      console.warn('Could not find product with ID:', productId);
+    }
+  }, [messages, selectedProductId]);
+
+  // ENHANCED: Context-aware sendSuggestedQuestion
+  const sendSuggestedQuestion = useCallback(async (question: string, messageContextProduct?: any) => {
+    console.log('=== SENDING SUGGESTED QUESTION ===');
+    console.log('Question:', question);
+    console.log('Message context product:', messageContextProduct?.title || 'None');
+    console.log('Global context product:', contextProduct?.title || 'None');
+    console.log('Selected product ID:', selectedProductId);
+    
+    // The backend will handle the context detection properly
+    // Just send the question as-is, with the selected product ID
     await sendMessage(question);
-  }, [sendMessage]);
+  }, [sendMessage, selectedProductId]);
 
   const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions', page: number = 1) => {
     // Request more products for pagination

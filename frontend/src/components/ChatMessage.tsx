@@ -1,4 +1,4 @@
-// # File Path: /Users/nikhil/Sites/localhost/22-sep-11-12-Ai-Ecommerce-Chatbot/frontend/src/components/ChatMessage.tsx
+// File Path: /frontend/src/components/ChatMessage.tsx
 
 import React, { useState } from 'react';
 import { Bot, User, Clock, MessageSquare, Lightbulb, ChevronRight, Filter, Star } from 'lucide-react';
@@ -32,7 +32,7 @@ interface ChatMessageProps {
   };
   selectedProductId?: string;
   onFocusProduct?: (productId: string) => void;
-  onSendSuggestedQuestion?: (question: string) => void;
+  onSendSuggestedQuestion?: (question: string, contextProduct?: any) => void;
   onRequestMore?: (type: 'exact' | 'suggestions') => void;
   onAskAboutProduct?: (productNumber: number, question: string) => void;
   className?: string;
@@ -71,9 +71,29 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     });
   };
 
+  // ENHANCED: Handle suggested question clicks with better context handling
   const handleSuggestedClick = (question: string) => {
+    console.log('=== ChatMessage: Suggested Question Clicked ===');
+    console.log('Question:', question);
+    console.log('Message context product:', message.context_product?.title || 'None');
+    console.log('Selected product ID:', selectedProductId);
+    
     if (onSendSuggestedQuestion) {
-      onSendSuggestedQuestion(question);
+      // Let the useChat hook handle context detection
+      onSendSuggestedQuestion(question, message.context_product);
+    } else {
+      console.warn('ChatMessage: onSendSuggestedQuestion handler not provided');
+    }
+  };
+
+  // ENHANCED: Handle product focus with context update
+  const handleProductFocus = (productId: string, product: any) => {
+    console.log('=== ChatMessage: Product Focused ===');
+    console.log('Product ID:', productId);
+    console.log('Product:', product?.title || 'Unknown');
+    
+    if (onFocusProduct) {
+      onFocusProduct(productId);
     }
   };
 
@@ -201,7 +221,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     <ProductCard
                       product={product}
                       isSelected={selectedProductId === product.shopify_id}
-                      onClick={() => onFocusProduct?.(product.shopify_id)}
+                      onClick={() => handleProductFocus(product.shopify_id, product)}
                       showCompact={exactToShow.length > 1}
                     />
                   </div>
@@ -256,7 +276,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     key={`suggestion-${product.shopify_id}-${index}`}
                     product={product}
                     isSelected={selectedProductId === product.shopify_id}
-                    onClick={() => onFocusProduct?.(product.shopify_id)}
+                    onClick={() => handleProductFocus(product.shopify_id, product)}
                     showCompact={true}
                     variant="suggestion"
                   />
@@ -298,7 +318,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             </div>
           )}
 
-          {/* Suggested Questions */}
+          {/* ENHANCED: Suggested Questions with better context handling */}
           {hasSuggestedQuestions && isBot && (
             <div className="mt-4 w-full">
               <div className="flex items-center mb-2">
@@ -309,15 +329,32 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 {message.suggested_questions!.map((question, index) => (
                   <button
                     key={`suggestion-${index}`}
-                    onClick={() => handleSuggestedClick(question)}
+                    onClick={() => {
+                      console.log('Suggestion button clicked:', question);
+                      handleSuggestedClick(question);
+                    }}
                     className="inline-flex items-center px-3 py-2 bg-white border border-amber-300 
                              rounded-full text-sm text-amber-800 hover:bg-amber-50 
-                             hover:border-amber-400 transition-colors duration-200 shadow-sm"
+                             hover:border-amber-400 transition-colors duration-200 shadow-sm
+                             cursor-pointer active:bg-amber-100"
+                    title={`Ask: ${question}`}
                   >
+                    <MessageSquare className="w-3 h-3 mr-1" />
                     {question}
                   </button>
                 ))}
               </div>
+              
+              {/* Debug info for context product */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="mt-2 text-xs text-gray-400 bg-gray-50 p-2 rounded">
+                  <div><strong>Debug Context Info:</strong></div>
+                  <div>Message Context: {message.context_product?.title || 'None'}</div>
+                  <div>Selected ID: {selectedProductId || 'None'}</div>
+                  <div>Exact Matches: {exactMatches.length}</div>
+                  <div>Suggestions: {suggestions.length}</div>
+                </div>
+              )}
             </div>
           )}
         </div>

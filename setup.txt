@@ -1,0 +1,103 @@
+# Project Setup Instructions
+
+## 1. Install Dependencies
+
+### Backend (Python)
+```zsh
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Frontend (Next.js)
+```zsh
+cd frontend
+npm install
+```
+
+## 2. Setup PostgreSQL Database
+- Ensure PostgreSQL is running (use Docker or local install).
+- Create a database (e.g., `ai_ecommerce_chatbot`).
+
+```zsh
+# Example: using psql
+psql -U postgres
+CREATE DATABASE ai_ecommerce_chatbot;
+\q
+```
+- Update `backend/app/config.py` with your DB credentials.
+
+- Create tables:
+```zsh
+cd backend
+source venv/bin/activate
+python app/main.py --init-db
+```
+(If you have a custom script for migrations, run that instead.)
+
+## 3. Setup Qdrant Vector DB
+- Start Qdrant (use Docker or local install):
+```zsh
+docker run -p 6333:6333 qdrant/qdrant
+```
+- The backend will auto-create collections on first sync. No manual table creation needed for Qdrant.
+
+## 4. Configure Shopify Webhooks
+- Run the setup script to register webhooks:
+```zsh
+cd backend/scripts
+python setup_webhooks.py
+```
+- Ensure your backend is accessible to Shopify (use ngrok for local dev):
+```zsh
+ngrok http 8000
+```
+- Update webhook URLs in Shopify admin to point to your public ngrok URL (e.g., `https://xxxx.ngrok.io/api/v1/webhooks/products-create` etc.)
+
+## 5. Start Backend & Frontend
+
+### Backend (FastAPI)
+```zsh
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --reload
+```
+
+### Frontend (Next.js)
+```zsh
+cd frontend
+npm run dev
+```
+
+## 6. Test Webhooks & Sync
+- Create/update/delete products in Shopify and verify sync in your app.
+- Check logs in `backend/app.log` and `backend/data_sync.txt` for errors.
+
+## 7. Additional Notes
+- For production, set proper environment variables and secrets in `backend/app/config.py`.
+- Make sure Qdrant and PostgreSQL are accessible from the backend.
+- For troubleshooting, check logs and webhook delivery status in Shopify admin.
+
+## 8. Bootstrap Backend (DB & Qdrant Initialization)
+
+The script `backend/scripts/bootstrap_backend.py` is used to automatically:
+- Load environment variables from `.env` (such as `DATABASE_URL`, QDRANT config, etc.)
+- Create or update all PostgreSQL tables using SQLAlchemy ORM
+- Ensure the Qdrant vector collection exists (creates it if missing)
+
+**Run this script after setting up your environment and before starting the backend:**
+
+```zsh
+cd backend
+python scripts/bootstrap_backend.py
+```
+
+This will:
+- Set up all required database tables
+- Prepare the Qdrant vector DB collection
+- Print status messages for each step
+
+If you see errors, check your `.env` and database connection settings.
+
+---
