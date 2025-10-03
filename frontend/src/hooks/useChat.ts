@@ -12,6 +12,20 @@ export const useChat = () => {
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [contextProduct, setContextProduct] = useState<any>(null);
   const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+
+  // Sanitize bot bold markers so raw ** doesn't appear
+  const sanitizeBotText = useCallback((text: string): string => {
+    if (!text) return text;
+    // Preserve **Image N:** markers for ChatMessage image rendering
+    return text.replace(/\*\*([^*]+)\*\*/g, (match, p1) => {
+      const trimmed = String(p1).trim();
+      if (/^Image\s+\d+:$/i.test(trimmed)) {
+        return match; // keep as-is for detection
+      }
+      return trimmed; // strip bold for other segments
+    });
+  }, []);
+
   // Load existing history from server when email/session is known (cross-browser restore)
   useEffect(() => {
     const email = typeof window !== 'undefined' ? window.localStorage.getItem('chatEmail') : null;
@@ -32,7 +46,7 @@ export const useChat = () => {
       try {
         const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
         const sessionIdLS = typeof window !== 'undefined' ? window.localStorage.getItem('chatSessionId') : '';
-        const qs = new URLSearchParams({ email });
+        const qs = new URLSearchParams({ email: email as string });
         if (sessionIdLS) qs.set('session_id', sessionIdLS);
         const res = await fetch(`${base}/chat/history?${qs.toString()}`, { cache: 'no-store' });
         if (!res.ok) return;
@@ -40,9 +54,10 @@ export const useChat = () => {
         if (data?.session_id) window.localStorage.setItem('chatSessionId', data.session_id);
         const msgs = (data?.messages || []).map((m: any, idx: number) => {
           const extra = m.extra || {};
+          const content = m.role === 'user' ? m.content : sanitizeBotText(m.content);
           return {
             id: `${idx + 1}`,
-            message: m.content,
+            message: content,
             sender: m.role === 'user' ? 'user' : 'bot',
             timestamp: m.created_at ? new Date(m.created_at) : new Date(),
             // Restore enhanced payload for assistant messages
@@ -90,7 +105,7 @@ export const useChat = () => {
       }
     };
     load();
-  }, []);
+  }, [sanitizeBotText]);
 
 
   // Stable session id for this browser tab
@@ -151,7 +166,7 @@ export const useChat = () => {
       // Create enhanced bot response message
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
-        message: response.response,
+        message: sanitizeBotText(response.response),
         sender: 'bot',
         timestamp: new Date(),
         // Dual slider data
