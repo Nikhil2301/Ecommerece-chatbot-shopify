@@ -12,8 +12,8 @@ This project is an AI-powered e-commerce chatbot built with a FastAPI backend an
 
 ## Prerequisites
 Before setting up the project, ensure you have the following installed:
-- **Python 3.8+** (for backend)
-- **Node.js 18+** and **npm** (for frontend)
+- **Python** (for backend)
+- **Node.js** and **npm** (for frontend)
 - **PostgreSQL** (local or via Docker)
 - **Docker** (optional, for Qdrant and PostgreSQL)
 - **ngrok** (for local webhook testing)
@@ -66,13 +66,8 @@ cd ai-ecommerce-chatbot
 
 ### 4. Set Up PostgreSQL Database
 1. Ensure PostgreSQL is running (use Docker or a local installation).
-2. Create a database:
-   ```bash
-   psql -U postgres
-   CREATE DATABASE ai_ecommerce_chatbot;
-   \q
-   ```
-3. Initialize database tables by running the bootstrap script:
+
+2. Initialize database and tables by running the bootstrap script:
    ```bash
    cd backend
    python scripts/bootstrap_backend.py
@@ -155,10 +150,3 @@ cd ai-ecommerce-chatbot
 - Create, update, or delete products/orders in your Shopify admin to verify webhook sync.
 - Check logs in `backend/app.log` and `backend/data_sync.txt` for errors.
 - Monitor webhook delivery status in Shopify admin under **Settings > Notifications > Webhooks**.
-
-## Troubleshooting
-- **Database Errors**: Ensure `DATABASE_URL` in `.env` is correct and PostgreSQL is running.
-- **Qdrant Errors**: Verify Qdrant is running and accessible at `QDRANT_HOST` and `QDRANT_PORT`.
-- **Webhook Errors**: Check ngrok URL accessibility and Shopify webhook settings. Use `python scripts/setup_webhooks.py list` to verify registered webhooks.
-- **Backend Errors**: Check `backend/app.log` for detailed error messages.
-- **Frontend Errors**: Check the browser console and Next.js terminal output for
