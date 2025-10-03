@@ -23,9 +23,12 @@ export async function sendChatMessage(
   maxResults?: number,
   filters?: Record<string, any>,
   pageNumber?: number
+
 ) {
-  const email = _email ?? localStorage.getItem('chatEmail') ?? '';
-  const sessionId = _sessionId ?? localStorage.getItem('chatSessionId') ?? '';
+  const email = _email ?? (typeof window !== 'undefined' ? window.localStorage.getItem('chatEmail') ?? '' : '');
+  // CRITICAL: Prefer server-issued session from localStorage so refresh continues same session
+  const sessionFromLS = typeof window !== 'undefined' ? (window.localStorage.getItem('chatSessionId') || '') : '';
+  const sessionId = sessionFromLS || _sessionId || '';
   const emailLS = (typeof window !== 'undefined' && window.localStorage.getItem('chatEmail')) || null;
   const sessionLS = (typeof window !== 'undefined' && window.localStorage.getItem('chatSessionId')) || null;
 
