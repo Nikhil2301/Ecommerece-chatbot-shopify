@@ -11,6 +11,8 @@ from .order_line_item import OrderLineItem
 from .line_item_price_set import LineItemPriceSet
 from .line_item_tax_line import LineItemTaxLine
 from .order_address import OrderAddress
+from .chat_session import ChatSession
+from .chat_message import ChatMessage
 
 __all__ = [
     "Product",

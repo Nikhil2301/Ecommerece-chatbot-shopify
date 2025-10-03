@@ -15,7 +15,6 @@ import os
 import sys
 import traceback
 from urllib.parse import urlparse
-from sqlalchemy import text  # import text for executable SQL
 
 # 1. Detect project root & insert into path
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -34,7 +33,6 @@ try:
 except ImportError:
     print("[bootstrap] python-dotenv not installed; skipping .env load")
 
-
 def ensure_db():
     from sqlalchemy import create_engine, text
     from sqlalchemy.exc import ProgrammingError
@@ -46,10 +44,10 @@ def ensure_db():
 
     url = urlparse(DATABASE_URL)
     db_name = url.path.lstrip("/")
-    db_url_without_db = f"postgresql://{url.username}:{url.password}@{url.hostname}:{url.port}/postgres"
+    superuser_url = f"postgresql://{url.username}:{url.password}@{url.hostname}:{url.port}/postgres"
 
     try:
-        engine = create_engine(db_url_without_db, future=True)
+        engine = create_engine(superuser_url, future=True)
         conn = engine.connect()
         conn.execute(text("COMMIT"))
         conn.execute(text(f"CREATE DATABASE {db_name}"))
@@ -64,39 +62,33 @@ def ensure_db():
     Base.metadata.create_all(bind=engine)
     print("[bootstrap] ✅ PostgreSQL tables created/verified")
 
-
 def ensure_qdrant():
     from qdrant_client import QdrantClient
-    import os
 
     host = os.getenv("QDRANT_HOST", "localhost")
-    port = int(os.getenv("QDRANT_PORT", 6333))
+    port = int(os.getenv("QDRANT_PORT", "6335"))
     api_key = os.getenv("QDRANT_API_KEY") or None
 
+    # Use HTTP URL (no HTTPS) and omit TLS flags
+    url = f"http://{host}:{port}"
+
+    client = QdrantClient(
+        url=url,
+        api_key=api_key,
+        prefer_grpc=False  # use HTTP/REST
+    )
+
     try:
-        client = QdrantClient(
-            host=host,
-            port=port,
-            api_key=api_key,
-            https=False if api_key is None else True,
-            prefer_grpc=False
-        )
-
-        # List collections instead of fetching detailed info
-        collections = client.get_collections()
-        collection_names = [c.name for c in collections.collections]
-
-        target_collection = "products"  # or your collection name
-        if target_collection in collection_names:
-            print(f"[bootstrap] ✅ Qdrant collection '{target_collection}' ready")
+        resp = client.get_collections()
+        names = [c.name for c in resp.collections]
+        target = "products"  # your collection name
+        if target in names:
+            print(f"[bootstrap] ✅ Qdrant collection '{target}' ready")
         else:
-            print(f"[bootstrap] ❌ Qdrant collection '{target_collection}' missing")
-
+            print(f"[bootstrap] ❌ Qdrant collection '{target}' missing")
     except Exception as e:
         print(f"[bootstrap] ❌ Qdrant connection failed: {e}")
         raise
-
-
 
 def main():
     try:
@@ -114,7 +106,6 @@ def main():
         sys.exit(2)
 
     print("[bootstrap] 🚀 Bootstrap complete")
-
 
 if __name__ == "__main__":
     main()

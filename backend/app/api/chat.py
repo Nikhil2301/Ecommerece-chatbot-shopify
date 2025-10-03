@@ -10,8 +10,11 @@ import re
 from app.database import get_db
 from app.models.product import Product
 from app.models.order import Order
+from app.models.chat_session import ChatSession
+from app.models.chat_message import ChatMessage as ChatMsgModel  # Corrected import
 from app.services.openai_service import OpenAIService
 from app.services.vector_service import VectorService
+# Removed circular import: the Pydantic ChatMessage schema is defined below in this file
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -171,10 +174,11 @@ def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
     # Price filter with safe conversion
     if 'price_filter' in filters and filters['price_filter']:
         max_price = filters['price_filter'].get('max')
-        if max_price:
+        if max_price is not None:
             max_price = float(max_price)  # Ensure max_price is float
+            original = filtered
             filtered = []
-            for p in filtered:
+            for p in original:
                 product_price = safe_float_convert(p.get('price', 0))
                 if product_price <= max_price:
                     filtered.append(p)
@@ -441,6 +445,30 @@ async def chat_endpoint(
     try:
         openai_service = OpenAIService()
         vector_service = VectorService()
+
+        # --- SESSION HANDLING ---
+        # Use email to identify a persistent ChatSession in DB.
+        # session_id is used only for in-memory context and frontend continuity per tab.
+        session_id = chat_message.session_id or None
+        email = chat_message.email or None
+        session_obj = None
+        if email:
+            session_obj = db.query(ChatSession).filter(ChatSession.email == email).first()
+            if not session_obj:
+                session_obj = ChatSession(email=email)
+                db.add(session_obj)
+                db.commit()
+                db.refresh(session_obj)
+
+        # --- STORE USER MESSAGE ---
+        if session_obj:
+            user_chat = ChatMsgModel(
+                session_id=session_obj.id,
+                sender="user",
+                message=chat_message.message
+            )
+            db.add(user_chat)
+            db.commit()
 
         # Initialize session context
         session_id = chat_message.session_id or "default"
@@ -1007,6 +1035,16 @@ async def chat_endpoint(
                 "Can you help me find something specific?"
             ]
 
+        # --- STORE BOT MESSAGE ---
+        if session_obj:
+            bot_chat = ChatMsgModel(
+                session_id=session_obj.id,
+                sender="bot",
+                message=response_text
+            )
+            db.add(bot_chat)
+            db.commit()
+
         # Update session context
         session_context[session_id]['last_query'] = chat_message.message
 
@@ -1120,7 +1158,7 @@ async def get_more_products(
         if session_id not in session_context:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        session_data = session_context[session_id]
+        session_data = session_context
         # Implementation for loading more products based on last search
         # This would re-run the search with different page parameters
         
