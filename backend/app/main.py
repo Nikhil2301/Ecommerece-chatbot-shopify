@@ -12,6 +12,7 @@ from app.api.chat import router as chat_router
 from app.api.products import router as products_router
 from app.api.orders import router as orders_router
 from app.api.webhooks import router as webhooks_router
+from app.api.auth import router as auth_router
 
 # Configure logging
 logging.basicConfig(
@@ -53,7 +54,7 @@ app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 app.include_router(products_router, prefix="/api/v1", tags=["products"])
 app.include_router(orders_router, prefix="/api/v1", tags=["orders"])
 app.include_router(webhooks_router, prefix="/api/v1", tags=["webhooks"])
-
+app.include_router(auth_router)
 @app.on_event("startup")
 async def startup_event():
     """Application startup event"""
@@ -65,21 +66,20 @@ async def startup_event():
     
     # Initialize services
     try:
-        from app.database import engine
-        from app.models.product import Base as ProductBase
-        from app.models.order import Base as OrderBase
-        
-        # Create tables if they don't exist
-        ProductBase.metadata.create_all(bind=engine)
-        OrderBase.metadata.create_all(bind=engine)
-        
+        # Import engine and Base, and ensure all models are registered
+        from app.database import engine, Base
+        import app.models  # noqa: F401 - registers models with Base metadata
+
+        # Create all tables if they don't exist
+        Base.metadata.create_all(bind=engine)
+
         logger.info("Database tables initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
     
     # Initialize vector service
     try:
-        from app.services.vector_service import VectorService
+        from app.services._vector_service import VectorService
         vector_service = VectorService()
         logger.info("Vector service initialized successfully")
     except Exception as e:
@@ -123,7 +123,7 @@ async def health_check():
         
         # Test vector service
         try:
-            from app.services.vector_service import VectorService
+            from app.services._vector_service import VectorService
             vector_service = VectorService()
             vector_info = vector_service.get_collection_info()
             vector_status = "connected"

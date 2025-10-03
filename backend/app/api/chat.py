@@ -10,11 +10,16 @@ import re
 from app.database import get_db
 from app.models.product import Product
 from app.models.order import Order
-from app.models.chat_session import ChatSession
-from app.models.chat_message import ChatMessage as ChatMsgModel  # Corrected import
-from app.services.openai_service import OpenAIService
-from app.services.vector_service import VectorService
-# Removed circular import: the Pydantic ChatMessage schema is defined below in this file
+from app.services._openai_service import OpenAIService
+from app.services._vector_service import VectorService
+
+from uuid import uuid4
+from sqlalchemy import func, asc, desc
+try:
+    from app.models.chat import User as UserDB, ChatSession as ChatSessionDB, ChatMessage as ChatMessageDB
+except Exception:
+    UserDB = ChatSessionDB = ChatMessageDB = None  # tables not ready yet
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -174,11 +179,10 @@ def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
     # Price filter with safe conversion
     if 'price_filter' in filters and filters['price_filter']:
         max_price = filters['price_filter'].get('max')
-        if max_price is not None:
+        if max_price:
             max_price = float(max_price)  # Ensure max_price is float
-            original = filtered
             filtered = []
-            for p in original:
+            for p in filtered:
                 product_price = safe_float_convert(p.get('price', 0))
                 if product_price <= max_price:
                     filtered.append(p)
@@ -446,32 +450,87 @@ async def chat_endpoint(
         openai_service = OpenAIService()
         vector_service = VectorService()
 
-        # --- SESSION HANDLING ---
-        # Use email to identify a persistent ChatSession in DB.
-        # session_id is used only for in-memory context and frontend continuity per tab.
-        session_id = chat_message.session_id or None
-        email = chat_message.email or None
-        session_obj = None
-        if email:
-            session_obj = db.query(ChatSession).filter(ChatSession.email == email).first()
-            if not session_obj:
-                session_obj = ChatSession(email=email)
-                db.add(session_obj)
-                db.commit()
-                db.refresh(session_obj)
-
-        # --- STORE USER MESSAGE ---
-        if session_obj:
-            user_chat = ChatMsgModel(
-                session_id=session_obj.id,
-                sender="user",
-                message=chat_message.message
-            )
-            db.add(user_chat)
-            db.commit()
-
         # Initialize session context
         session_id = chat_message.session_id or "default"
+
+        # === Persist: ensure user & session and save the user message ===
+        email_val = (chat_message.email or "").strip().lower()
+        if not email_val:
+            raise HTTPException(status_code=400, detail="email is required for chat")
+
+        # If session_id not provided or set to 'default', generate a new one
+        if not chat_message.session_id or chat_message.session_id == "default":
+            # Try to reuse the most recent session for this user; if none, create one
+            try:
+                if UserDB and ChatSessionDB:
+                    last_session = (
+                        db.query(ChatSessionDB)
+                          .filter(ChatSessionDB.user_id == user_db.id)
+                          .order_by(ChatSessionDB.last_activity_at.desc())
+                          .first()
+                    )
+                    if last_session:
+                        session_id = last_session.id
+                    else:
+                        session_id = str(uuid4())
+                else:
+                    session_id = str(uuid4())
+            except Exception:
+                session_id = str(uuid4())
+
+        session_db = None
+        try:
+            if UserDB and ChatSessionDB and ChatMessageDB:
+                user_db = db.query(UserDB).filter(UserDB.email == email_val).one_or_none()
+                if not user_db:
+                    user_db = UserDB(email=email_val)
+                    db.add(user_db)
+                    db.flush()
+
+                session_db = db.query(ChatSessionDB).filter(ChatSessionDB.id == session_id, ChatSessionDB.user_id == user_db.id).one_or_none()
+                if not session_db:
+                    # If the given session_id wasn't found, attempt to reuse last session
+                    last_session = None
+                    if ChatSessionDB:
+                        last_session = (
+                            db.query(ChatSessionDB)
+                              .filter(ChatSessionDB.user_id == user_db.id)
+                              .order_by(ChatSessionDB.last_activity_at.desc())
+                              .first()
+                        )
+                    if last_session:
+                        session_db = last_session
+                        session_id = last_session.id
+                    else:
+                        session_id = session_id or str(uuid4())
+                        session_db = ChatSessionDB(
+                            id=session_id,
+                            user_id=user_db.id,
+                            session_metadata={}
+                        )
+                        db.add(session_db)
+                        db.flush()
+
+                # Save the user message turn
+                db.add(ChatMessageDB(
+                    session_id=session_db.id,
+                    role="user",
+                    content=chat_message.message,
+                    extra={
+                        "selected_product_id": chat_message.selected_product_id,
+                        "filters": chat_message.filters,
+                        "page_number": chat_message.page_number,
+                    }
+                ))
+                db.commit()
+        except Exception as e:
+            logger.error(f"Persistence (user turn) failed: {e}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        # === End persist user turn ===
+
         if session_id not in session_context:
             session_context[session_id] = {
                 'product_ids': [],
@@ -1035,16 +1094,6 @@ async def chat_endpoint(
                 "Can you help me find something specific?"
             ]
 
-        # --- STORE BOT MESSAGE ---
-        if session_obj:
-            bot_chat = ChatMsgModel(
-                session_id=session_obj.id,
-                sender="bot",
-                message=response_text
-            )
-            db.add(bot_chat)
-            db.commit()
-
         # Update session context
         session_context[session_id]['last_query'] = chat_message.message
 
@@ -1059,25 +1108,58 @@ async def chat_endpoint(
         session_context[session_id]['conversation_history'].append(bot_msg)
 
         # ENHANCED: Always return the current context product in response
+        
+        # === Persist: assistant turn ===
+        try:
+            if ChatMessageDB and session_db:
+                db.add(ChatMessageDB(
+                    session_id=session_db.id,
+                    role="assistant",
+                    content=response_text,
+                    extra={
+                        "intent": intent,
+                        "applied_filters": applied_filters,
+                        "search_metadata": search_metadata,
+                        "suggested_questions": suggested_questions,
+                        "show_exact_slider": show_exact_slider,
+                        "show_suggestions_slider": show_suggestions_slider,
+                        "total_exact_matches": total_exact_matches,
+                        "total_suggestions": total_suggestions,
+                        "current_page": current_page,
+                        "has_more_exact": has_more_exact,
+                        "has_more_suggestions": has_more_suggestions
+                    }
+                ))
+                if ChatSessionDB and session_db:
+                    session_db.last_activity_at = func.now()
+                db.commit()
+        except Exception as e:
+            logger.error(f"Persistence (assistant turn) failed: {e}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        # === End persist assistant turn ===
+
         return ChatResponse(
-            response=response_text,
-            intent=intent,
-            confidence=confidence,
-            exact_matches=exact_matches if show_exact_slider else [],
-            suggestions=suggestions if show_suggestions_slider else [],
-            orders=orders,
-            context_product=context_product,  # Always include current context
-            show_exact_slider=show_exact_slider,
-            show_suggestions_slider=show_suggestions_slider,
-            suggested_questions=suggested_questions,
-            total_exact_matches=total_exact_matches,
-            total_suggestions=total_suggestions,
-            current_page=current_page,
-            has_more_exact=has_more_exact,
-            has_more_suggestions=has_more_suggestions,
-            applied_filters=applied_filters,
-            search_metadata=search_metadata
-        )
+                response=response_text,
+                intent=intent,
+                confidence=confidence,
+                exact_matches=exact_matches if show_exact_slider else [],
+                suggestions=suggestions if show_suggestions_slider else [],
+                orders=orders,
+                context_product=context_product,  # Always include current context
+                show_exact_slider=show_exact_slider,
+                show_suggestions_slider=show_suggestions_slider,
+                suggested_questions=suggested_questions,
+                total_exact_matches=total_exact_matches,
+                total_suggestions=total_suggestions,
+                current_page=current_page,
+                has_more_exact=has_more_exact,
+                has_more_suggestions=has_more_suggestions,
+                applied_filters=applied_filters,
+                search_metadata=search_metadata
+            )
 
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}")
@@ -1158,7 +1240,7 @@ async def get_more_products(
         if session_id not in session_context:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        session_data = session_context
+        session_data = session_context[session_id]
         # Implementation for loading more products based on last search
         # This would re-run the search with different page parameters
         
@@ -1182,3 +1264,67 @@ async def clear_session_context(session_id: str):
 async def get_session_context(session_id: str):
     """Get current session context (for debugging)"""
     return session_context.get(session_id, {})
+
+
+try:
+    from app.models.chat import User, ChatSession, ChatMessage
+except Exception:
+    User = ChatSession = ChatMessage = None  # type: ignore
+
+@router.get("/chat/history")
+def get_history(
+    email: str = Query(..., description="User email"),
+    session_id: Optional[str] = Query(None, description="Chat session id; if absent, use most recent session"),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """
+    Return messages for the given session.
+    If session_id is missing, picks the user's most recent session.
+    """
+    # Models must be imported at module level:
+    # from app.models.chat import User, ChatSession, ChatMessage
+    if User is None:
+        return {"session_id": None, "messages": []}
+    user = db.query(User).filter(User.email == email.strip().lower()).one_or_none()
+    if not user:
+        return {"session_id": None, "messages": []}
+
+    # Resolve session
+    session = None
+    if session_id:
+        session = (
+            db.query(ChatSession)
+              .filter(ChatSession.id == session_id, ChatSession.user_id == user.id)
+              .one_or_none()
+        )
+    if not session:
+        session = (
+            db.query(ChatSession)
+              .filter(ChatSession.user_id == user.id)
+              .order_by(desc(ChatSession.last_activity_at))
+              .first()
+        )
+    if not session:
+        return {"session_id": None, "messages": []}
+
+    # Fetch messages oldest → newest
+    msgs = (
+        db.query(ChatMessage)
+          .filter(ChatMessage.session_id == session.id)
+          .order_by(asc(ChatMessage.created_at))
+          .limit(limit)
+          .all()
+    )
+    return {
+        "session_id": session.id,
+        "messages": [
+            {
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "extra": m.extra,
+            }
+            for m in msgs
+        ],
+    }

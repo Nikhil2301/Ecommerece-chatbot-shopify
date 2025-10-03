@@ -15,6 +15,7 @@ import os
 import sys
 import traceback
 from urllib.parse import urlparse
+from sqlalchemy import text  # import text for executable SQL
 
 # 1. Detect project root & insert into path
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -44,10 +45,10 @@ def ensure_db():
 
     url = urlparse(DATABASE_URL)
     db_name = url.path.lstrip("/")
-    superuser_url = f"postgresql://{url.username}:{url.password}@{url.hostname}:{url.port}/postgres"
+    db_url_without_db = f"postgresql://{url.username}:{url.password}@{url.hostname}:{url.port}/postgres"
 
     try:
-        engine = create_engine(superuser_url, future=True)
+        engine = create_engine(db_url_without_db, future=True)
         conn = engine.connect()
         conn.execute(text("COMMIT"))
         conn.execute(text(f"CREATE DATABASE {db_name}"))
@@ -59,36 +60,48 @@ def ensure_db():
         print(f"[bootstrap] Error creating database: {e}")
 
     engine = create_engine(DATABASE_URL, future=True)
+    import app.models
     Base.metadata.create_all(bind=engine)
     print("[bootstrap] ✅ PostgreSQL tables created/verified")
 
+
 def ensure_qdrant():
     from qdrant_client import QdrantClient
+    import os
 
     host = os.getenv("QDRANT_HOST", "localhost")
-    port = int(os.getenv("QDRANT_PORT", "6335"))
+    port = int(os.getenv("QDRANT_PORT", 6333))
     api_key = os.getenv("QDRANT_API_KEY") or None
 
-    # Use HTTP URL (no HTTPS) and omit TLS flags
-    url = f"http://{host}:{port}"
-
-    client = QdrantClient(
-        url=url,
-        api_key=api_key,
-        prefer_grpc=False  # use HTTP/REST
-    )
-
     try:
-        resp = client.get_collections()
-        names = [c.name for c in resp.collections]
-        target = "products"  # your collection name
-        if target in names:
-            print(f"[bootstrap] ✅ Qdrant collection '{target}' ready")
+        client = QdrantClient(
+            host=host,
+            port=port,
+            api_key=api_key,
+            https=False,
+            prefer_grpc=False
+        )
+
+        collections = client.get_collections()
+        collection_names = [c.name for c in collections.collections]
+
+        target_collection = "products"  # or your collection name
+        if target_collection in collection_names:
+            print(f"[bootstrap] ✅ Qdrant collection '{target_collection}' ready")
         else:
-            print(f"[bootstrap] ❌ Qdrant collection '{target}' missing")
+            print(f"[bootstrap] ❌ Qdrant collection '{target_collection}' missing")
+            # Create the collection if missing
+            client.create_collection(
+                collection_name=target_collection,
+                vectors_config={"size": 384, "distance": "Cosine"}
+            )
+            print(f"[bootstrap] ✅ Qdrant collection '{target_collection}' created")
+
     except Exception as e:
         print(f"[bootstrap] ❌ Qdrant connection failed: {e}")
         raise
+
+
 
 def main():
     try:
