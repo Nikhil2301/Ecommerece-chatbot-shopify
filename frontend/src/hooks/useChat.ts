@@ -38,12 +38,34 @@ export const useChat = () => {
         if (!res.ok) return;
         const data = await res.json();
         if (data?.session_id) window.localStorage.setItem('chatSessionId', data.session_id);
-        const msgs = (data?.messages || []).map((m: any, idx: number) => ({
-          id: `${idx + 1}`,
-          message: m.content,
-          sender: m.role === 'user' ? 'user' : 'bot',
-          timestamp: m.created_at ? new Date(m.created_at) : new Date(),
-        }));
+        const msgs = (data?.messages || []).map((m: any, idx: number) => {
+          const extra = m.extra || {};
+          return {
+            id: `${idx + 1}`,
+            message: m.content,
+            sender: m.role === 'user' ? 'user' : 'bot',
+            timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+            // Restore enhanced payload for assistant messages
+            exact_matches: extra.exact_matches || extra.products || undefined,
+            suggestions: extra.suggestions || undefined,
+            orders: extra.orders || undefined,
+            suggested_questions: extra.suggested_questions || [],
+            context_product: extra.context_product || undefined,
+            show_exact_slider: (
+              (extra.show_exact_slider ?? ((extra.exact_matches && extra.exact_matches.length > 0) ? true : false))
+            ) as boolean,
+            show_suggestions_slider: (
+              (extra.show_suggestions_slider ?? ((extra.suggestions && extra.suggestions.length > 0) ? true : false))
+            ) as boolean,
+            total_exact_matches: extra.total_exact_matches,
+            total_suggestions: extra.total_suggestions,
+            current_page: extra.current_page,
+            has_more_exact: extra.has_more_exact,
+            has_more_suggestions: extra.has_more_suggestions,
+            applied_filters: extra.applied_filters,
+            search_metadata: extra.search_metadata,
+          } as ChatMessage;
+        });
         if (msgs.length) {
           setMessages(msgs);
           setConversationHistory(

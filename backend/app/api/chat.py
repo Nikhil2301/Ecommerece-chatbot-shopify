@@ -17,8 +17,10 @@ from uuid import uuid4
 from sqlalchemy import func, asc, desc
 try:
     from app.models.chat import User as UserDB, ChatSession as ChatSessionDB, ChatMessage as ChatMessageDB
+    from app.models.chat_extras import ChatMessageProduct as ChatMessageProductDB, ChatMessageOrder as ChatMessageOrderDB
 except Exception:
     UserDB = ChatSessionDB = ChatMessageDB = None  # tables not ready yet
+    ChatMessageProductDB = ChatMessageOrderDB = None
 
 
 logger = logging.getLogger(__name__)
@@ -1096,11 +1098,57 @@ async def chat_endpoint(
         session_context[session_id]['conversation_history'].append(bot_msg)
 
         # ENHANCED: Always return the current context product in response
-        
+
+        # Helper to trim product objects for storage
+        def _trim_product(p: Dict) -> Dict:
+            if not p:
+                return {}
+            return {
+                "id": p.get("id"),
+                "shopify_id": p.get("shopify_id"),
+                "title": p.get("title"),
+                "price": p.get("price"),
+                "compare_at_price": p.get("compare_at_price"),
+                "vendor": p.get("vendor"),
+                "product_type": p.get("product_type"),
+                "inventory_quantity": p.get("inventory_quantity"),
+                "images": [{"src": i.get("src"), "alt": i.get("alt") or i.get("alt_text")}
+                           for i in (p.get("images") or [])[:5]],
+            }
+
+        def _trim_order(o: Dict) -> Dict:
+            if not o:
+                return {}
+            return {
+                "id": o.get("id"),
+                "shopify_id": o.get("shopify_id"),
+                "order_number": o.get("order_number"),
+                "total_price": o.get("total_price"),
+                "financial_status": o.get("financial_status"),
+                "fulfillment_status": o.get("fulfillment_status"),
+                "created_at": o.get("created_at"),
+                "line_items": [
+                    {
+                        "title": li.get("title"),
+                        "quantity": li.get("quantity"),
+                        "price": li.get("price"),
+                        "vendor": li.get("vendor"),
+                    }
+                    for li in (o.get("line_items") or [])[:10]
+                ],
+            }
+
+        # Prepare payloads to store
+        trimmed_exact = [_trim_product(p) for p in (exact_matches or [])[:50]]
+        trimmed_suggestions = [_trim_product(p) for p in (suggestions or [])[:50]]
+        trimmed_orders = [_trim_order(o) for o in (orders or [])[:50]] if orders else []
+        trimmed_context = _trim_product(context_product) if context_product else None
+
         # === Persist: assistant turn ===
         try:
             if ChatMessageDB and session_db:
-                db.add(ChatMessageDB(
+                # Create assistant message first so we get its ID
+                assistant_msg = ChatMessageDB(
                     session_id=session_db.id,
                     role="assistant",
                     content=response_text,
@@ -1115,9 +1163,66 @@ async def chat_endpoint(
                         "total_suggestions": total_suggestions,
                         "current_page": current_page,
                         "has_more_exact": has_more_exact,
-                        "has_more_suggestions": has_more_suggestions
+                        "has_more_suggestions": has_more_suggestions,
+                        # Persist sliders/orders/context (also in normalized tables below)
+                        "exact_matches": trimmed_exact,
+                        "suggestions": trimmed_suggestions,
+                        "orders": trimmed_orders,
+                        "context_product": trimmed_context,
+                        "selected_product_id": session_context.get(session_id, {}).get("selected_product_id"),
                     }
-                ))
+                )
+                db.add(assistant_msg)
+                db.flush()  # obtain assistant_msg.id
+
+                # Also store normalized rows if models are available
+                if ChatMessageProductDB:
+                    product_rows = []
+                    for p in trimmed_exact:
+                        product_rows.append(ChatMessageProductDB(
+                            message_id=assistant_msg.id,
+                            kind="exact",
+                            shopify_id=p.get("shopify_id"),
+                            title=p.get("title"),
+                            vendor=p.get("vendor"),
+                            product_type=p.get("product_type"),
+                            price=str(p.get("price")),
+                            compare_at_price=str(p.get("compare_at_price")),
+                            inventory_quantity=p.get("inventory_quantity"),
+                            snapshot=p,
+                        ))
+                    for p in trimmed_suggestions:
+                        product_rows.append(ChatMessageProductDB(
+                            message_id=assistant_msg.id,
+                            kind="suggestion",
+                            shopify_id=p.get("shopify_id"),
+                            title=p.get("title"),
+                            vendor=p.get("vendor"),
+                            product_type=p.get("product_type"),
+                            price=str(p.get("price")),
+                            compare_at_price=str(p.get("compare_at_price")),
+                            inventory_quantity=p.get("inventory_quantity"),
+                            snapshot=p,
+                        ))
+                    if product_rows:
+                        db.add_all(product_rows)
+
+                if ChatMessageOrderDB and trimmed_orders:
+                    order_rows = []
+                    for o in trimmed_orders:
+                        order_rows.append(ChatMessageOrderDB(
+                            message_id=assistant_msg.id,
+                            shopify_id=o.get("shopify_id"),
+                            order_number=o.get("order_number"),
+                            total_price=str(o.get("total_price")),
+                            financial_status=o.get("financial_status"),
+                            fulfillment_status=o.get("fulfillment_status"),
+                            created_at_remote=o.get("created_at"),
+                            snapshot=o,
+                        ))
+                    if order_rows:
+                        db.add_all(order_rows)
+
                 if ChatSessionDB and session_db:
                     session_db.last_activity_at = func.now()
                 db.commit()
