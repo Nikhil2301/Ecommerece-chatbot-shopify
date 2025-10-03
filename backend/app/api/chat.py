@@ -179,13 +179,12 @@ def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
     # Price filter with safe conversion
     if 'price_filter' in filters and filters['price_filter']:
         max_price = filters['price_filter'].get('max')
-        if max_price:
-            max_price = float(max_price)  # Ensure max_price is float
-            filtered = []
-            for p in filtered:
-                product_price = safe_float_convert(p.get('price', 0))
-                if product_price <= max_price:
-                    filtered.append(p)
+        if max_price is not None:
+            max_price = float(max_price)
+            filtered = [
+                p for p in filtered
+                if safe_float_convert(p.get('price', 0)) <= max_price
+            ]
     
     # Brand filter
     if 'brand_filter' in filters and filters['brand_filter']:
@@ -458,11 +457,20 @@ async def chat_endpoint(
         if not email_val:
             raise HTTPException(status_code=400, detail="email is required for chat")
 
-        # If session_id not provided or set to 'default', generate a new one
-        if not chat_message.session_id or chat_message.session_id == "default":
-            # Try to reuse the most recent session for this user; if none, create one
-            try:
-                if UserDB and ChatSessionDB:
+        # Ensure user exists, then resolve session and persist the user message
+        session_db = None
+        try:
+            if UserDB and ChatSessionDB and ChatMessageDB:
+                # 1) Ensure user
+                user_db = db.query(UserDB).filter(UserDB.email == email_val).one_or_none()
+                if not user_db:
+                    user_db = UserDB(email=email_val)
+                    db.add(user_db)
+                    db.flush()
+
+                # 2) Resolve session id: use provided, else most recent, else new
+                resolved_session_id = chat_message.session_id or None
+                if not resolved_session_id:
                     last_session = (
                         db.query(ChatSessionDB)
                           .filter(ChatSessionDB.user_id == user_db.id)
@@ -470,48 +478,28 @@ async def chat_endpoint(
                           .first()
                     )
                     if last_session:
-                        session_id = last_session.id
+                        resolved_session_id = last_session.id
                     else:
-                        session_id = str(uuid4())
-                else:
-                    session_id = str(uuid4())
-            except Exception:
-                session_id = str(uuid4())
+                        resolved_session_id = str(uuid4())
 
-        session_db = None
-        try:
-            if UserDB and ChatSessionDB and ChatMessageDB:
-                user_db = db.query(UserDB).filter(UserDB.email == email_val).one_or_none()
-                if not user_db:
-                    user_db = UserDB(email=email_val)
-                    db.add(user_db)
+                # 3) Load or create session
+                session_db = (
+                    db.query(ChatSessionDB)
+                      .filter(ChatSessionDB.id == resolved_session_id, ChatSessionDB.user_id == user_db.id)
+                      .one_or_none()
+                )
+                if not session_db:
+                    session_db = ChatSessionDB(
+                        id=resolved_session_id,
+                        user_id=user_db.id,
+                        session_metadata={}
+                    )
+                    db.add(session_db)
                     db.flush()
 
-                session_db = db.query(ChatSessionDB).filter(ChatSessionDB.id == session_id, ChatSessionDB.user_id == user_db.id).one_or_none()
-                if not session_db:
-                    # If the given session_id wasn't found, attempt to reuse last session
-                    last_session = None
-                    if ChatSessionDB:
-                        last_session = (
-                            db.query(ChatSessionDB)
-                              .filter(ChatSessionDB.user_id == user_db.id)
-                              .order_by(ChatSessionDB.last_activity_at.desc())
-                              .first()
-                        )
-                    if last_session:
-                        session_db = last_session
-                        session_id = last_session.id
-                    else:
-                        session_id = session_id or str(uuid4())
-                        session_db = ChatSessionDB(
-                            id=session_id,
-                            user_id=user_db.id,
-                            session_metadata={}
-                        )
-                        db.add(session_db)
-                        db.flush()
+                session_id = session_db.id  # use resolved
 
-                # Save the user message turn
+                # 4) Save the user message turn
                 db.add(ChatMessageDB(
                     session_id=session_db.id,
                     role="user",

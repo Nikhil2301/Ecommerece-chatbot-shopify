@@ -5,14 +5,7 @@ import { ChatMessage, ChatResponse } from '@/types';
 import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      message: "Hello! I'm your AI shopping assistant. I can help you find products and check your order status. You can ask for specific amounts like 'show me 3 products' or filter by price like 'under $50'. What can I help you with today?",
-      sender: 'bot',
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +15,18 @@ export const useChat = () => {
   // Load existing history from server when email/session is known (cross-browser restore)
   useEffect(() => {
     const email = typeof window !== 'undefined' ? window.localStorage.getItem('chatEmail') : null;
-    if (!email) return;
+    if (!email) {
+      // If no email, show initial bot message
+      setMessages([
+        {
+          id: '1',
+          message: "Hello! I'm your AI shopping assistant. I can help you find products and check your order status. You can ask for specific amounts like 'show me 3 products' or filter by price like 'under $50'. What can I help you with today?",
+          sender: 'bot',
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
 
     const load = async () => {
       try {
@@ -48,6 +52,16 @@ export const useChat = () => {
               content: m.message
             }))
           );
+        } else {
+          // If no history, show initial bot message
+          setMessages([
+            {
+              id: '1',
+              message: "Hello! I'm your AI shopping assistant. I can help you find products and check your order status. You can ask for specific amounts like 'show me 3 products' or filter by price like 'under $50'. What can I help you with today?",
+              sender: 'bot',
+              timestamp: new Date(),
+            },
+          ]);
         }
       } catch (_err) {
         // ignore history load failure

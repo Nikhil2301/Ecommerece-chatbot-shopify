@@ -6,7 +6,7 @@ load_dotenv()
 class Settings:
     DATABASE_URL = os.getenv("DATABASE_URL")
     QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6335))
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
