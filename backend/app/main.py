@@ -55,6 +55,7 @@ app.include_router(products_router, prefix="/api/v1", tags=["products"])
 app.include_router(orders_router, prefix="/api/v1", tags=["orders"])
 app.include_router(webhooks_router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(auth_router)
+
 @app.on_event("startup")
 async def startup_event():
     """Application startup event"""
@@ -79,11 +80,27 @@ async def startup_event():
     
     # Initialize vector service
     try:
-        from app.services._vector_service import VectorService
+        from app.services.vector_service import VectorService
         vector_service = VectorService()
         logger.info("Vector service initialized successfully")
     except Exception as e:
         logger.error(f"Vector service initialization failed: {e}")
+        
+    # --- Initial Product Sync Logic ---
+    skip_initial_sync = os.getenv("SKIP_INITIAL_SYNC", "false").lower() == "true"
+    if not skip_initial_sync:
+        try:
+            from app.database import get_db
+            from app.services.data_sync import DataSyncService
+            db = next(get_db())
+            sync_service = DataSyncService()
+            stats = sync_service.sync_products(db)
+            logger.info(f"Initial product sync completed: {stats}")
+            db.close()
+        except Exception as e:
+            logger.error(f"Initial product sync failed: {e}")
+    else:
+        logger.info("SKIP_INITIAL_SYNC is true, skipping initial product sync.")
         
     logger.info("Application started successfully")
 
@@ -123,7 +140,7 @@ async def health_check():
         
         # Test vector service
         try:
-            from app.services._vector_service import VectorService
+            from app.services.vector_service import VectorService
             vector_service = VectorService()
             vector_info = vector_service.get_collection_info()
             vector_status = "connected"

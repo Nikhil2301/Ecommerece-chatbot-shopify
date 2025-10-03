@@ -10,8 +10,8 @@ import re
 from app.database import get_db
 from app.models.product import Product
 from app.models.order import Order
-from app.services._openai_service import OpenAIService
-from app.services._vector_service import VectorService
+from app.services.openai_service import OpenAIService
+from app.services.vector_service import VectorService
 
 from uuid import uuid4
 from sqlalchemy import func, asc, desc

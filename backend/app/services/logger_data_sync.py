@@ -5,7 +5,7 @@ from app.database import get_db, engine
 from app.models.product import Product
 from app.models.order import Order
 from app.services.shopify_service import ShopifyService
-from app.services.vector_service import VectorService
+from backend.app.services.vector_service import VectorService
 from datetime import datetime
 import json
 
