@@ -39,8 +39,8 @@ const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         <div className="flex items-center space-x-2">
           <CreditCard className="w-4 h-4 text-gray-400" />
           <span className="text-xs text-gray-600">Payment:</span>
-          <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(order.financial_status)}`}>
-            {order.financial_status}
+          <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(order.financial_status || 'pending')}`}>
+            {order.financial_status || 'Pending'}
           </span>
         </div>
         
