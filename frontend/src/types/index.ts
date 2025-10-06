@@ -247,7 +247,7 @@ export interface PaginationInfo {
 }
 
 // Utility types
-export type ProductVariant = 'default' | 'suggestion' | 'featured';
+export type ProductVariantType = 'default' | 'suggestion' | 'featured';
 export type SliderType = 'exact' | 'suggestions';
 export type IntentType = 'PRODUCT_SEARCH' | 'ORDER_INQUIRY' | 'GENERAL_CHAT' | 'HELP';
 export type QuestionType = 'price' | 'discount' | 'size' | 'availability' | 'color' | 'material' | 'options' | 'general';
