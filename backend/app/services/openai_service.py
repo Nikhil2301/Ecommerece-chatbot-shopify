@@ -30,9 +30,23 @@ class OpenAIService:
         
         # Build conversation context
         context_text = ""
+        dynamic_options_info = ""
+        extracted_options = {}
+        dynamic_qtypes = "size|color|material"  # default when no dynamic options
         if context_product:
             context_text = f"Current product context: {context_product.get('title', 'Unknown')} (ID: {context_product.get('shopify_id', 'N/A')})\n"
-        
+            # Extract dynamic options for context
+            extracted_options = self.extract_product_options(context_product)
+            options = extracted_options.get('options', {})
+            if options:
+                dynamic_qtypes = "|".join([name.lower() for name in options.keys()])
+                dynamic_options_info = "Available product options:\n"
+                for opt_name, values in options.items():
+                    if values:
+                        shown = values[:6]
+                        suffix = f" (+{len(values) - 6} more)" if len(values) > 6 else ""
+                        dynamic_options_info += f"- {opt_name}: {', '.join(shown)}{suffix}\n"
+                context_text += dynamic_options_info
         if conversation_history:
             recent_messages = conversation_history[-4:]  # Last 4 messages
             context_text += "Recent conversation:\n"
@@ -40,6 +54,17 @@ class OpenAIService:
                 role = "User" if msg.get('role') == 'user' else "Assistant"
                 context_text += f"{role}: {msg.get('message', '')}\n"
 
+        # Dynamically generate question types based on options if available
+        base_question_types = "price: asking about cost, pricing, how much; discount: asking about sales, discounts, deals, offers; availability: asking about stock, availability, in stock; images: asking to see product images, photos, pictures; general: general product information"
+        if dynamic_options_info:
+            option_question_types = ""
+            for opt_name in extracted_options.get('options', {}).keys():
+                lname = opt_name.lower()
+                if any(word in lname for word in ['color', 'colour', 'size', 'material', 'fabric', 'age', 'option']):
+                    option_question_types += f"{opt_name.lower()}: asking about {opt_name.lower()} options or variants; "
+            if option_question_types:
+                base_question_types += "; " + option_question_types
+        
         system_prompt = f"""You are an AI assistant that analyzes user messages to determine their intent in an e-commerce context.
 
 {context_text}
@@ -59,20 +84,13 @@ Classify user messages into:
 4. HELP – user requests assistance
 
 CRITICAL CONTEXT ANALYSIS:
-- If user asks "what colors are available?", "what's the price?", "what sizes?", "is there discount?" without mentioning a specific product, and there's a current product context, this is a follow-up question (is_followup_question: true) about that product.
+- If user asks "what options are available?", "what's the price?", "is there discount?" without mentioning a specific product, and there's a current product context, this is a follow-up question (is_followup_question: true) about that product.
 - If user mentions specific product names or searches for new products, this is a new search (is_followup_question: false).
 - If user says "show me", "find me", "I want", this is typically a new search.
 
 Question Types:
-- price: asking about cost, pricing, how much
-- discount: asking about sales, discounts, deals, offers
-- size: asking about sizes, fit, measurements
-- availability: asking about stock, availability, in stock
-- color: asking about colors, colour options
-- material: asking about fabric, material, what it's made of
-- options: general product options or features
-- images: asking to see product images, photos, pictures
-- general: general product information
+{base_question_types}
+options: general product options or features
 
 Extract any mentioned order_number, customer_email, and keywords for product searches.
 
@@ -85,7 +103,7 @@ Respond in JSON:
 "order_number": "...",
 "customer_email": "...",
 "is_followup_question": true/false,
-"question_type": "price|discount|size|availability|color|material|options|images|general",
+"question_type": "price|discount|availability|{dynamic_qtypes}|images|general",
 "context_aware": true/false
 }}
 }}"""
@@ -202,19 +220,25 @@ Respond in JSON:
                     variant_info += "(❌ Out of Stock)"
                 product_context += variant_info + "\n"
 
-        # Question-specific system prompts
+        # Dynamically generate question prompts based on extracted options
         question_prompts = {
-            "color": "The user is asking specifically about color options. Focus on available colors and their availability.",
-            "size": "The user is asking about sizes. Focus on size options, fit information, and size availability.",
             "price": "The user is asking about pricing. Focus on the current price, any discounts, and value information.",
             "discount": "The user is asking about discounts or sales. Check if there are any current discounts and highlight savings.",
             "availability": "The user is asking about stock/availability. Focus on inventory levels and availability status.",
-            "material": "The user is asking about materials or fabric. Focus on what the product is made of and material properties.",
-            "options": "The user is asking about product options or features. Provide comprehensive option information.",
             "images": "The user is asking about product images. Tell them that images are available and list the image URLs if present."
         }
+        # Add dynamic prompts for options
+        for opt_name in options.keys():
+            lname = opt_name.lower()
+            question_prompts[lname] = f"The user is asking about {opt_name.lower()} options. Focus on available {opt_name.lower()} values and their availability."
+        question_prompts["options"] = "The user is asking about product options or features. Provide comprehensive option information."
+        question_prompts["general"] = "Provide helpful product information based on the user's question."
+        question_prompts["material"] = question_prompts.get("material", "The user is asking about materials or fabric. Focus on what the product is made of and material properties.")  # Fallback if not dynamic
 
         context_instruction = question_prompts.get(question_type, "Provide helpful product information based on the user's question.")
+
+        # Limit examples to first two options to avoid overly long prompts
+        example_options = "/".join([n.lower() for n in list(options.keys())[:2]]) if len(options) > 0 else "options"
 
         system_prompt = f"""You are a helpful e-commerce assistant. {context_instruction}
 
@@ -228,7 +252,7 @@ Important Instructions:
 1. Answer specifically about THIS product only
 2. Be direct and focused on their exact question
 3. Use the product information provided above
-4. If asking about colors/sizes/options, list what's actually available
+4. If asking about options (e.g., colors/sizes/{example_options}), list what's actually available
 5. If asking about price/discount, use the exact pricing information provided
 6. If asking about availability, use the inventory information provided
 7. If asking about images, mention the available images and provide URLs if requested
@@ -254,20 +278,13 @@ Generate a direct, specific answer to their question about this product."""
         except Exception as e:
             logger.error(f"Error generating product-specific response: {e}")
             
-            # Fallback response based on question type
-            if question_type == "color":
-                colors = extracted_options.get('colors', [])
-                if colors:
-                    return f"The **{product.get('title')}** is available in these colors: **{', '.join(colors)}**. All colors are currently in stock!"
+            # Dynamic fallback response based on question type
+            if question_type in extracted_options.get('options', {}):
+                opt_values = extracted_options['options'].get(question_type, [])
+                if opt_values:
+                    return f"The **{product.get('title')}** is available in these {question_type}: **{', '.join(opt_values)}**. All {question_type} are currently in stock!"
                 else:
-                    return f"The **{product.get('title')}** comes in its standard color. Let me know if you'd like more details!"
-            
-            elif question_type == "size":
-                sizes = extracted_options.get('sizes', [])
-                if sizes:
-                    return f"The **{product.get('title')}** is available in these sizes: **{', '.join(sizes)}**. Check the size chart for the best fit!"
-                else:
-                    return f"This product comes in a standard size. Contact us for specific measurements if needed!"
+                    return f"The **{product.get('title')}** comes in its standard {question_type}. Let me know if you'd like more details!"
             
             elif question_type == "price":
                 return f"The **{product.get('title')}** is priced at **{price_str}**. {discount_info}"
@@ -326,29 +343,11 @@ Generate a direct, specific answer to their question about this product."""
                 'attributes': attributes,
             })
 
-        # Backward-compatible convenience keys
-        def pick_values_by_name(substrs: List[str]) -> List[str]:
-            out = set()
-            for name, vals in dynamic_options.items():
-                lname = name.lower()
-                if any(s in lname for s in substrs):
-                    out.update(vals)
-            return sorted(list(out))
-
-        colors = pick_values_by_name(['color', 'colour'])
-        sizes = pick_values_by_name(['size'])
-        fabrics = pick_values_by_name(['fabric', 'material'])
-        age_groups = pick_values_by_name(['age', 'age group', 'age_group'])
-
         # Convert sets to sorted lists for serialization
         options_as_lists = {k: sorted(list(v)) for k, v in dynamic_options.items()}
 
         return {
             'options': options_as_lists,
-            'colors': colors,
-            'sizes': sizes,
-            'fabrics': fabrics,
-            'age_groups': age_groups,
             'stock_status': stock_status,
             'option_names': option_names,
         }
@@ -361,9 +360,19 @@ Generate a direct, specific answer to their question about this product."""
 
         if len(products) == 1:
             product = products[0].get("product", {}) if "product" in products[0] else products[0]
-            return f"I found **{product.get('title', 'this product')}** that matches your search! You can ask me about its colors, sizes, price, images, or any other details."
+            extracted_options = self.extract_product_options(product)
+            options_summary = ""
+            if extracted_options.get('options'):
+                options_summary = f" with options like {', '.join(extracted_options['options'].keys())}"
+            return f"I found **{product.get('title', 'this product')}** that matches your search!{options_summary} You can ask me about its price, availability, images, or any other details."
         else:
-            return f"I found {len(products)} products that match your search. Take a look at the options below, and feel free to ask me about any specific product!"
+            # Dynamically summarize common options across products if possible
+            common_options = set()
+            for p in products[:3]:  # Check first few
+                opts = self.extract_product_options(p).get('options', {})
+                common_options.update(opts.keys())
+            options_summary = f" with options like {', '.join(list(common_options)[:2])}" if common_options else ""
+            return f"I found {len(products)} products that match your search.{options_summary} Take a look at the options below, and feel free to ask me about any specific product!"
 
     def generate_order_response(self, orders: List[Dict], user_query: str) -> str:
         """Generate response about order status"""
@@ -376,15 +385,20 @@ Generate a direct, specific answer to their question about this product."""
             # List all items with quantity and name
             item_lines = []
             for item in order.get('line_items', []):
-                item_lines.append(f"- {item.get('quantity', 1)}x {item.get('title', 'N/A')}")
+                item_lines.append(f"- {item.get('quantity', 1)}x {item.get('title', 'N/A')} ({item.get('price', 'N/A')} each)")
             
-            items_text = '\n'.join(item_lines)
+            items_text = '\n'.join(item_lines) if item_lines else "No line items available."
+            
+            # Include address if available
+            shipping_address = next((addr for addr in order.get('addresses', []) if addr.get('address_type') == 'shipping'), None)
+            address_text = f"- **Shipping To:** {shipping_address.get('name', 'N/A')}, {shipping_address.get('address1', '')}, {shipping_address.get('city', '')}, {shipping_address.get('province', '')} {shipping_address.get('zip', '')}" if shipping_address else ""
             
             orders_text += f"""
 ### Order #{order.get('order_number', 'N/A')}
 - **Status:** {order.get('financial_status', 'N/A')} (Payment), {order.get('fulfillment_status', 'Unfulfilled')} (Shipping)
 - **Total:** ${order.get('total_price', 'N/A')} {order.get('currency', '')}
 - **Date:** {order.get('created_at', 'N/A')}
+{address_text}
 - **Items:** {len(order.get('line_items', []))} item(s)
 
 **Ordered Items:**
@@ -395,7 +409,7 @@ Generate a direct, specific answer to their question about this product."""
 
         system_prompt = f"""You are a helpful customer service assistant. Based on the user's query about their order(s), provide a clear, informative response that:
 1. Addresses their specific question
-2. Provides relevant order details
+2. Provides relevant order details including items, totals, and shipping if available
 3. Explains order status in simple terms
 4. Offers additional help if needed
 
@@ -421,7 +435,8 @@ Provide a helpful, professional response."""
             
         except Exception as e:
             logger.error(f"Error generating order response: {e}")
-            return f"I found your order #{orders[0].get('order_number', 'N/A')}. Status: {orders[0].get('financial_status', 'N/A')} (Payment), {orders[0].get('fulfillment_status', 'Unfulfilled')} (Shipping). Total: ${orders[0].get('total_price', 'N/A')}. Please let me know if you have specific questions!"
+            order = orders[0]
+            return f"I found your order #{order.get('order_number', 'N/A')}. Status: {order.get('financial_status', 'N/A')} (Payment), {order.get('fulfillment_status', 'Unfulfilled')} (Shipping). Total: ${order.get('total_price', 'N/A')}. Please let me know if you have specific questions!"
 
     def generate_general_response(self, message: str) -> str:
         """Generate general conversational response"""

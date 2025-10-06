@@ -26,12 +26,12 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, fullScr
   };
 
   const inputClasses = fullScreen
-    ? "flex-1 border border-gray-300 rounded-xl p-4 text-base resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-    : "flex-1 border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+    ? "flex-1 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-xl p-4 text-base resize-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
+    : "flex-1 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500";
 
   const buttonClasses = fullScreen
-    ? "bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-4 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ml-3"
-    : "bg-blue-600 hover:bg-blue-700 text-white rounded-lg p-3 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ml-2";
+    ? "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-xl p-4 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ml-3"
+    : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg p-3 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ml-2";
 
   return (
     <form onSubmit={handleSubmit} className="flex items-end">

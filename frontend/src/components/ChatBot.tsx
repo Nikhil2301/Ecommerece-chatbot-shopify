@@ -9,15 +9,16 @@ interface ChatBotProps {
   isOpen: boolean;
   onToggle: () => void;
   fullScreen?: boolean;
+  position?: 'left' | 'right';
 }
 
-const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false }) => {
+const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false, position = 'right' }) => {
   const { messages, sendMessage, clearMessages, isLoading, error, selectedProductId, selectProduct } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState<boolean>(() => !!localStorage.getItem('chatEmail'));
   if (!ready) {
     return (
-      <div className="fixed bottom-4 right-4 w-full max-w-md rounded-2xl shadow-xl bg-white">
+      <div className={`fixed bottom-4 ${position === 'left' ? 'left-4' : 'right-4'} w-full max-w-md rounded-2xl shadow-xl bg-white`}>
         <div className="flex items-center justify-between p-3 border-b">
           <div className="font-semibold">AI Assistant</div>
           <button onClick={onToggle} className="p-1">✕</button>
@@ -38,7 +39,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false 
     return (
       <button
         onClick={onToggle}
-        className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-colors duration-200 z-50"
+        className={`fixed bottom-6 ${position === 'left' ? 'left-6' : 'right-6'} bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-colors duration-200 z-50`}
         aria-label="Open chat"
       >
         <MessageCircle className="w-6 h-6" />
@@ -48,7 +49,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false 
 
   const containerClasses = fullScreen 
     ? "h-full flex flex-col"
-    : "fixed bottom-6 right-6 bg-white rounded-2xl shadow-2xl w-96 h-[32rem] flex flex-col z-50";
+    : `fixed bottom-6 ${position === 'left' ? 'left-6' : 'right-6'} bg-white rounded-2xl shadow-2xl w-96 h-[32rem] flex flex-col z-50`;
 
   const headerClasses = fullScreen
     ? "hidden"
