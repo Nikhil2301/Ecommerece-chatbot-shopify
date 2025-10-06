@@ -51,6 +51,12 @@ export async function sendChatMessage(
   return res.json() as Promise<ChatResponse>;
 }
 
+export async function fetchProducts(skip = 0, limit = 100) {
+  const res = await fetch(`${API_BASE_URL}/products?skip=${skip}&limit=${limit}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // Enhanced query builders for common use cases
 export const QueryBuilder = {
   // Build a product search query with filters
@@ -97,4 +103,5 @@ export const QueryBuilder = {
 export default {
   sendChatMessage,
   QueryBuilder,
+  fetchProducts,
 };
