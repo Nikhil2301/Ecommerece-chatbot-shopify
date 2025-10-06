@@ -23,17 +23,6 @@ const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false,
     }
   }, []);
 
-  if (!ready) {
-    return (
-      <div className={`fixed bottom-4 ${position === 'left' ? 'left-4' : 'right-4'} w-full max-w-md rounded-2xl shadow-xl bg-white`}>
-        <div className="flex items-center justify-between p-3 border-b">
-          <div className="font-semibold">AI Assistant</div>
-          <button onClick={onToggle} className="p-1">✕</button>
-        </div>
-        <EmailGate onReady={() => setReady(true)} />
-      </div>
-    );
-  }
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -72,80 +61,88 @@ const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false,
 
   return (
     <div className={containerClasses}>
-      {/* Header - only show in popup mode */}
-      {!fullScreen && (
-        <div className={headerClasses}>
-          <div className="flex items-center">
-            <MessageCircle className="w-5 h-5 mr-2" />
-            <h3 className="text-lg font-semibold">AI Shopping Assistant</h3>
-          </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={clearMessages}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors duration-200"
-              title="Clear conversation"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onToggle}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors duration-200"
-              title="Close chat"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+      {!ready ? (
+        <div className="flex-1 flex items-center justify-center">
+          <EmailGate onReady={() => setReady(true)} />
         </div>
-      )}
-
-      {/* Messages */}
-      <div className={messagesClasses}>
-        {messages.length === 0 ? (
-          <div className="text-center text-gray-500 mt-8">
-            <MessageCircle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-lg font-medium mb-2">Welcome to AI Shopping Assistant!</p>
-            <p className="text-sm">
-              Ask me about products, orders, or anything else. I'm here to help!
-            </p>
-          </div>
-        ) : (
-          <>
-            {messages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                selectedProductId={selectedProductId}
-                onFocusProduct={selectProduct}
-                className={fullScreen ? "mb-6" : "mb-4"}
-              />
-            ))}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-                {error}
+      ) : (
+        <>
+          {/* Header - only show in popup mode */}
+          {!fullScreen && (
+            <div className={headerClasses}>
+              <div className="flex items-center">
+                <MessageCircle className="w-5 h-5 mr-2" />
+                <h3 className="text-lg font-semibold">AI Shopping Assistant</h3>
               </div>
-            )}
-          </>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={clearMessages}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors duration-200"
+                  title="Clear conversation"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={onToggle}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors duration-200"
+                  title="Close chat"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* Input */}
-      <div className={inputContainerClasses}>
-        <ChatInput 
-          onSendMessage={sendMessage} 
-          isLoading={isLoading} 
-          fullScreen={fullScreen}
-        />
-        {fullScreen && (
-          <button
-            onClick={clearMessages}
-            className="mt-4 flex items-center justify-center w-full py-2 text-gray-500 hover:text-gray-700 transition-colors duration-200"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Clear conversation
-          </button>
-        )}
-      </div>
+          {/* Messages */}
+          <div className={messagesClasses}>
+            {messages.length === 0 ? (
+              <div className="text-center text-gray-500 mt-8">
+                <MessageCircle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium mb-2">Welcome to AI Shopping Assistant!</p>
+                <p className="text-sm">
+                  Ask me about products, orders, or anything else. I'm here to help!
+                </p>
+              </div>
+            ) : (
+              <>
+                {messages.map((message) => (
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    selectedProductId={selectedProductId}
+                    onFocusProduct={selectProduct}
+                    className={fullScreen ? "mb-6" : "mb-4"}
+                  />
+                ))}
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+                    {error}
+                  </div>
+                )}
+              </>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className={inputContainerClasses}>
+            <ChatInput 
+              onSendMessage={sendMessage} 
+              isLoading={isLoading} 
+              fullScreen={fullScreen}
+            />
+            {fullScreen && (
+              <button
+                onClick={clearMessages}
+                className="mt-4 flex items-center justify-center w-full py-2 text-gray-500 hover:text-gray-700 transition-colors duration-200"
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Clear conversation
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

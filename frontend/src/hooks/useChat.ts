@@ -44,7 +44,7 @@ export const useChat = () => {
 
     const load = async () => {
       try {
-        const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+        const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api/v1';
         const sessionIdLS = typeof window !== 'undefined' ? window.localStorage.getItem('chatSessionId') : '';
         const qs = new URLSearchParams({ email: email as string });
         if (sessionIdLS) qs.set('session_id', sessionIdLS);

@@ -1,14 +1,21 @@
 
 // components/EmailGate.tsx
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api/v1';
 
 export default function EmailGate({ onReady }:{ onReady:()=>void }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string|undefined>();
+
+  // Ensure localStorage is available and hooks are always called in the same order
+  useEffect(() => {
+    if (typeof window !== 'undefined' && localStorage.getItem('chatEmail')) {
+      onReady();
+    }
+  }, [onReady]);
 
   async function identify(email: string, newSession = false) {
     const res = await fetch(`${API_BASE}/auth/identify`, {
