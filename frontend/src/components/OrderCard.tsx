@@ -60,7 +60,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         </div>
         
         <div className="text-xs text-gray-500">
-          Ordered: {new Date(order.created_at).toLocaleDateString()}
+          Ordered: {order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}
         </div>
       </div>
 
