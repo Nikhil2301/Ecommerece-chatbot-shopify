@@ -15,7 +15,14 @@ interface ChatBotProps {
 const ChatBot: React.FC<ChatBotProps> = ({ isOpen, onToggle, fullScreen = false, position = 'right' }) => {
   const { messages, sendMessage, clearMessages, isLoading, error, selectedProductId, selectProduct } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState<boolean>(() => !!localStorage.getItem('chatEmail'));
+  const [ready, setReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setReady(!!localStorage.getItem('chatEmail'));
+    }
+  }, []);
+
   if (!ready) {
     return (
       <div className={`fixed bottom-4 ${position === 'left' ? 'left-4' : 'right-4'} w-full max-w-md rounded-2xl shadow-xl bg-white`}>
