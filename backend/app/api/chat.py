@@ -92,6 +92,36 @@ def normalize_shopify_id(raw_id: Optional[str]) -> Optional[str]:
         return s.rsplit("/", 1)[-1]
     return s
 
+def extract_order_info(message: str) -> Dict:
+    """Extract order number and email from message using regex patterns as fallback"""
+    info = {
+        'order_number': None,
+        'email': None
+    }
+    
+    # Extract order number patterns
+    order_patterns = [
+        r'order\s*#?\s*(\d+)',
+        r'#\s*(\d+)',
+        r'order\s+number\s*:?\s*(\d+)',
+        r'tracking\s*#?\s*(\d+)',
+        r'^\s*(\d+)\s*$',  # Just a number alone
+    ]
+    
+    for pattern in order_patterns:
+        match = re.search(pattern, message.lower())
+        if match:
+            info['order_number'] = match.group(1)
+            break
+    
+    # Extract email patterns
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    email_match = re.search(email_pattern, message)
+    if email_match:
+        info['email'] = email_match.group(0)
+    
+    return info
+
 def parse_user_preferences(message: str) -> Dict:
     """Parse user message for specific preferences like count, price, etc."""
     preferences = {
@@ -532,6 +562,8 @@ async def chat_endpoint(
                 'numbered_products': {},  # Track products by number for "show me more like #2"
                 'recent_search_products': [],  # NEW: Track recent search results for position references
                 'selected_product': None,  # NEW: Track currently selected product
+                'pending_order_email': None,  # NEW: Remember email for order inquiry
+                'pending_order_number': None,  # NEW: Remember order number for order inquiry
             }
 
         # ENHANCED: Handle selected product ID from frontend
@@ -1025,54 +1057,138 @@ async def chat_endpoint(
                     ]
 
         elif intent == "ORDER_INQUIRY":
-            # Handle order inquiries (existing logic)
+        # Extract order info with enhanced parsing
+            extracted_info = intent_analysis.get("extracted_info", {})
             order_number = extracted_info.get("order_number")
             email = extracted_info.get("customer_email") or chat_message.email
-
-            if not order_number:
-                response_text = "For your privacy and security, please provide your order number to access your order details."
-                orders = None
-            else:
-                query = db.query(Order).options(joinedload(Order.line_items))
-                query = query.filter(Order.order_number == order_number)
-                if email:
-                    query = query.filter(Order.email == email)
+            specific_query = extracted_info.get("specific_query", "")
+            address_type = extracted_info.get("address_type", "")
+            
+            # Save newly provided info for future use
+            if email:
+                session_context[session_id]["pending_order_email"] = email
+            if order_number:
+                session_context[session_id]["pending_order_number"] = order_number
                 
-                order = query.first()
-
-                if not order:
-                    response_text = "Sorry, I couldn't find any order matching that number and email. Please verify and try again."
+            # Check for saved partial info from previous messages
+            saved_email = session_context[session_id].get("pending_order_email")
+            saved_order_number = session_context[session_id].get("pending_order_number")
+            
+            # Merge current info with saved info
+            if not email and saved_email:
+                email = saved_email
+                logger.info(f"Using saved email: {email}")
+            if not order_number and saved_order_number:
+                order_number = saved_order_number
+                logger.info(f"Using saved order number: {order_number}")
+                
+            # FALLBACK: Use regex extraction if AI missed it
+            fallback_info = extract_order_info(chat_message.message)
+            if not order_number and fallback_info["order_number"]:
+                order_number = fallback_info["order_number"]
+                logger.info(f"Fallback extracted order number: {order_number}")
+            if not email and fallback_info["email"]:
+                email = fallback_info["email"]
+                logger.info(f"Fallback extracted email: {email}")
+            
+            # Check what's missing and respond accordingly
+            if not order_number and not email:
+                response_text = "For your privacy and security, I need your order number and email address to look up your order. Please provide both."
+                orders = None
+                suggested_questions = ["My order number is 1234", "My email is user@example.com", "Order 1234, email user@example.com"]
+            elif not order_number:
+                # Have email but no order number
+                response_text = f"Thank you! I have your email ({email}). Now, please provide your order number so I can look up your order details."
+                orders = None
+                suggested_questions = ["My order number is 1234", "Order 1234", "It's order 1234"]
+            elif not email:
+                # Have order number but no email
+                response_text = f"Thank you! I have your order number ({order_number}). For security, please also provide your email address associated with this order."
+                orders = None
+                suggested_questions = ["My email is user@example.com", "user@example.com", "It's user@example.com"]
+            else:
+                # Have both - proceed with order lookup
+                logger.info(f"Looking up order {order_number} for email {email}")
+                
+                try:
+                    order_number_int = int(order_number)
+                except (ValueError, TypeError):
+                    response_text = f"The order number '{order_number}' doesn't look valid. Please provide a numeric order number (e.g., 1234)."
                     orders = None
+                    suggested_questions = ["My order number is 1234", "Let me try again", "Show me products instead"]
                 else:
-                    line_items = []
-                    for item in order.line_items:
-                        line_items.append({
-                            "id": getattr(item, "shopify_line_id", item.id),
-                            "name": getattr(item, "name", ""),
-                            "title": getattr(item, "title", ""),
-                            "quantity": getattr(item, "quantity", 0),
-                            "price": getattr(item, "price", 0),
-                            "total_discount": getattr(item, "total_discount", 0),
-                            "vendor": getattr(item, "vendor", ""),
-                            "sku": getattr(item, "sku", ""),
-                        })
-
-                    order_info = {
-                        "id": order.id,
-                        "shopify_id": order.shopify_id,
-                        "order_number": order.order_number,
-                        "email": order.email,
-                        "financial_status": order.financial_status,
-                        "fulfillment_status": order.fulfillment_status,
-                        "total_price": order.total_price,
-                        "currency": order.currency,
-                        "created_at": order.created_at.isoformat() if order.created_at else None,
-                        "line_items": line_items,
-                        "total_items": sum(item["quantity"] for item in line_items),
-                    }
-
-                    orders = [order_info]
-                    response_text = openai_service.generate_order_response(orders, chat_message.message)
+                    # ENHANCED: Load order with addresses using joinedload
+                    query = db.query(Order).options(
+                        joinedload(Order.line_items),
+                        joinedload(Order.addresses)  # Add this to load address data
+                    )
+                    query = query.filter(Order.order_number == order_number_int)
+                    query = query.filter(Order.email == email)
+                    order = query.first()
+                    
+                    if not order:
+                        response_text = f"Sorry, I couldn't find an order with number {order_number} for email {email}. Please verify both details and try again. Make sure you're using the exact email and order number from your order confirmation."
+                        orders = None
+                        # Clear saved info if order not found
+                        session_context[session_id]["pending_order_email"] = None
+                        session_context[session_id]["pending_order_number"] = None
+                        suggested_questions = ["Let me try a different order number", "Check order with different email", "Show me products instead"]
+                    else:
+                        # SUCCESS! Clear saved info and return order details
+                        session_context[session_id]["pending_order_email"] = None
+                        session_context[session_id]["pending_order_number"] = None
+                        
+                        # Format line items
+                        line_items = []
+                        for item in order.line_items:
+                            line_items.append({
+                                "id": getattr(item, "shopify_line_id", item.id),
+                                "name": getattr(item, "name", ""),
+                                "title": getattr(item, "title", ""),
+                                "quantity": getattr(item, "quantity", 0),
+                                "price": getattr(item, "price", 0),
+                                "total_discount": getattr(item, "total_discount", 0),
+                                "vendor": getattr(item, "vendor", ""),
+                                "sku": getattr(item, "sku", ""),
+                            })
+                        
+                        # ENHANCED: Format addresses  
+                        addresses = []
+                        for addr in getattr(order, "addresses", []):
+                            addresses.append({
+                                "address_type": getattr(addr, "address_type", ""),
+                                "name": getattr(addr, "name", ""),
+                                "company": getattr(addr, "company", ""),
+                                "address1": getattr(addr, "address1", ""),
+                                "address2": getattr(addr, "address2", ""),
+                                "city": getattr(addr, "city", ""),
+                                "province": getattr(addr, "province", ""),
+                                "zip": getattr(addr, "zip", ""),
+                                "country": getattr(addr, "country", ""),
+                                "phone": getattr(addr, "phone", "")
+                            })
+                        
+                        # Build comprehensive order info
+                        order_info = {
+                            "id": order.id,
+                            "shopify_id": order.shopify_id,
+                            "order_number": order.order_number,
+                            "email": order.email,
+                            "financial_status": order.financial_status,
+                            "fulfillment_status": order.fulfillment_status,
+                            "total_price": order.total_price,
+                            "currency": order.currency,
+                            "created_at": order.created_at.isoformat() if order.created_at else None,
+                            "line_items": line_items,
+                            "addresses": addresses,  # Include address data
+                            "total_items": sum(item["quantity"] for item in line_items)
+                        }
+                        
+                        orders = [order_info]
+                        
+                        # ENHANCED: Generate focused response based on query type
+                        response_text = openai_service.generate_order_response(orders, chat_message.message)
+                        suggested_questions = ["Track this order", "When will it arrive?", "Show me similar products"]
 
         else:
             # General conversation
