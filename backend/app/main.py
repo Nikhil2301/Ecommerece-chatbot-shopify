@@ -86,7 +86,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Vector service initialization failed: {e}")
         
-    # --- Initial Product Sync Logic ---
+    # --- Initial Data Sync Logic (Products, Orders, Inventory) ---
     skip_initial_sync = os.getenv("SKIP_INITIAL_SYNC", "false").lower() == "true"
     if not skip_initial_sync:
         try:
@@ -94,13 +94,27 @@ async def startup_event():
             from app.services.data_sync import DataSyncService
             db = next(get_db())
             sync_service = DataSyncService()
-            stats = sync_service.sync_products(db)
-            logger.info(f"Initial product sync completed: {stats}")
+            
+            # Sync Products
+            logger.info("Starting initial product sync...")
+            product_stats = sync_service.sync_products(db)
+            logger.info(f"✅ Initial product sync completed: {product_stats}")
+            
+            # Sync Orders
+            logger.info("Starting initial order sync...")
+            order_stats = sync_service.sync_orders(db)
+            logger.info(f"✅ Initial order sync completed: {order_stats}")
+            
+            # Note: Inventory items are synced via webhooks or as part of product variants
+            logger.info("📦 All initial data sync completed successfully")
+            
             db.close()
         except Exception as e:
-            logger.error(f"Initial product sync failed: {e}")
+            logger.error(f"Initial data sync failed: {e}")
+            import traceback
+            traceback.print_exc()
     else:
-        logger.info("SKIP_INITIAL_SYNC is true, skipping initial product sync.")
+        logger.info("SKIP_INITIAL_SYNC is true, skipping initial data sync.")
         
     logger.info("Application started successfully")
 

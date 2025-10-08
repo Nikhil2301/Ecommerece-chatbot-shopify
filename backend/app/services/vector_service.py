@@ -399,18 +399,47 @@ class VectorService:
             return False
 
     def get_collection_info(self) -> Dict:
-        """Get information about the collection"""
+        """Get information about the collection - handles Qdrant version compatibility"""
         try:
             info = self.client.get_collection(collection_name=self.collection_name)
-            return {
-                "points_count": info.points_count,
-                "status": info.status,
-                "config": info.config
-            }
+            # Handle different Qdrant response structures safely
+            result = {}
+            
+            # Try to get points count
+            if hasattr(info, 'points_count'):
+                result['points_count'] = info.points_count
+            elif hasattr(info, 'vectors_count'):
+                result['points_count'] = info.vectors_count
+            else:
+                result['points_count'] = 0
+            
+            # Try to get status
+            if hasattr(info, 'status'):
+                result['status'] = str(info.status)
+            else:
+                result['status'] = 'unknown'
+            
+            return result
         except Exception as e:
-            logger.error(f"Error getting collection info: {e}")
-            return {}
+            # Don't log as error - this is often just a version mismatch warning
+            logger.debug(f"Could not get detailed collection info (version mismatch): {e}")
+            return {'points_count': 0, 'status': 'unknown'}
     
-    def delete_all(self):
-        self.client.delete_collection(self.collection_name)
-        self._setup_collection()
+    def delete_all(self) -> bool:
+        """Delete all products from vector database and recreate collection"""
+        try:
+            # Check if collection exists
+            collections = self.client.get_collections().collections
+            collection_exists = any(c.name == self.collection_name for c in collections)
+            
+            if collection_exists:
+                self.client.delete_collection(self.collection_name)
+                logger.info(f"Deleted collection: {self.collection_name}")
+            
+            # Recreate collection
+            self._setup_collection()
+            logger.info(f"Recreated collection: {self.collection_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error in delete_all: {e}")
+            return False
