@@ -716,7 +716,14 @@ async def chat_endpoint(
                     response_text = f"Here are products similar to #{target_id} - {reference_product.get('title', 'that product')}:"
                 else:
                     response_text = f"I couldn't find product #{target_id} from our recent results. Please try a new search."
-                    search_query = " ".join(keywords) if keywords else chat_message.message
+                    # Fix: Handle keywords as both string and list
+                    if keywords:
+                        if isinstance(keywords, list):
+                            search_query = " ".join(keywords)
+                        else:
+                            search_query = str(keywords)
+                    else:
+                        search_query = chat_message.message
             
             # NEW: Handle position-based product references
             elif user_preferences.get('product_position_reference'):
@@ -750,11 +757,25 @@ async def chat_endpoint(
                     ]
                 else:
                     response_text = f"I couldn't find a product at position {position} from the recent results. Please try a new search."
-                    search_query = " ".join(keywords) if keywords else chat_message.message
+                    # Fix: Handle keywords as both string and list
+                    if keywords:
+                        if isinstance(keywords, list):
+                            search_query = " ".join(keywords)
+                        else:
+                            search_query = str(keywords)
+                    else:
+                        search_query = chat_message.message
             
             else:
                 # New product search
-                search_query = " ".join(keywords) if keywords else chat_message.message
+                # Fix: Handle keywords as both string and list
+                if keywords:
+                    if isinstance(keywords, list):
+                        search_query = " ".join(keywords)
+                    else:
+                        search_query = str(keywords)
+                else:
+                    search_query = chat_message.message
                 logger.info(f"Searching for: {search_query}")
 
                 # Determine search limit based on user preference or default

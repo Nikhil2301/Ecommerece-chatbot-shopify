@@ -1,4 +1,5 @@
-// File Path: /frontend/src/hooks/useChat.ts
+// File: useChat.ts - Complete fixed version with auto-scroll and pagination
+// Path: /frontend/src/hooks/useChat.ts
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { ChatMessage, ChatResponse } from '@/types';
@@ -6,16 +7,20 @@ import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
-  const [contextProduct, setContextProduct] = useState<any>(null);
+  const [contextProduct, setContextProduct] = useState<any | null>(null);
   const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+
+  // FIXED: Add states for pagination context
+  const [lastSearchResults, setLastSearchResults] = useState<any[]>([]);
+  const [lastSearchQuery, setLastSearchQuery] = useState('');
 
   // Sanitize bot bold markers so raw ** doesn't appear
   const sanitizeBotText = useCallback((text: string): string => {
     if (!text) return text;
+
     // Preserve **Image N:** markers for ChatMessage image rendering
     return text.replace(/\*\*([^*]+)\*\*/g, (match, p1) => {
       const trimmed = String(p1).trim();
@@ -26,101 +31,69 @@ export const useChat = () => {
     });
   }, []);
 
-  // Load existing history from server when email/session is known (cross-browser restore)
-  useEffect(() => {
-    const email = typeof window !== 'undefined' ? window.localStorage.getItem('chatEmail') : null;
-    if (!email) {
-      // If no email, show initial bot message
-      setMessages([
-        {
-          id: '1',
-          message: "Hello! I'm your AI shopping assistant. I can help you find products and check your order status. You can ask for specific amounts like 'show me 3 products' or filter by price like 'under $50'. What can I help you with today?",
-          sender: 'bot',
-          timestamp: new Date(),
-        },
-      ]);
-      return;
-    }
-
-    const load = async () => {
-      try {
-        const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api/v1';
-        const sessionIdLS = typeof window !== 'undefined' ? window.localStorage.getItem('chatSessionId') : '';
-        const qs = new URLSearchParams({ email: email as string });
-        if (sessionIdLS) qs.set('session_id', sessionIdLS);
-        const res = await fetch(`${base}/chat/history?${qs.toString()}`, { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.session_id) window.localStorage.setItem('chatSessionId', data.session_id);
-        const msgs = (data?.messages || []).map((m: any, idx: number) => {
-          const extra = m.extra || {};
-          const content = m.role === 'user' ? m.content : sanitizeBotText(m.content);
-          return {
-            id: `${idx + 1}`,
-            message: content,
-            sender: m.role === 'user' ? 'user' : 'bot',
-            timestamp: m.created_at ? new Date(m.created_at) : new Date(),
-            // Restore enhanced payload for assistant messages
-            exact_matches: extra.exact_matches || extra.products || undefined,
-            suggestions: extra.suggestions || undefined,
-            orders: extra.orders || undefined,
-            suggested_questions: extra.suggested_questions || [],
-            context_product: extra.context_product || undefined,
-            show_exact_slider: (
-              (extra.show_exact_slider ?? ((extra.exact_matches && extra.exact_matches.length > 0) ? true : false))
-            ) as boolean,
-            show_suggestions_slider: (
-              (extra.show_suggestions_slider ?? ((extra.suggestions && extra.suggestions.length > 0) ? true : false))
-            ) as boolean,
-            total_exact_matches: extra.total_exact_matches,
-            total_suggestions: extra.total_suggestions,
-            current_page: extra.current_page,
-            has_more_exact: extra.has_more_exact,
-            has_more_suggestions: extra.has_more_suggestions,
-            applied_filters: extra.applied_filters,
-            search_metadata: extra.search_metadata,
-          } as ChatMessage;
-        });
-        if (msgs.length) {
-          setMessages(msgs);
-          setConversationHistory(
-            msgs.map((m: any) => ({
-              role: m.sender === 'user' ? 'user' : 'assistant',
-              content: m.message
-            }))
-          );
-        } else {
-          // If no history, show initial bot message
-          setMessages([
-            {
-              id: '1',
-              message: "Hello! I'm your AI shopping assistant. I can help you find products and check your order status. You can ask for specific amounts like 'show me 3 products' or filter by price like 'under $50'. What can I help you with today?",
-              sender: 'bot',
-              timestamp: new Date(),
-            },
-          ]);
-        }
-      } catch (_err) {
-        // ignore history load failure
-      }
-    };
-    load();
-  }, [sanitizeBotText]);
-
-
-  // Stable session id for this browser tab
+  // Generate or get session ID
   const sessionId = useMemo(() => {
-    const existing = typeof window !== 'undefined' ? window.sessionStorage.getItem('chat_session_id') : null;
-    if (existing) return existing;
-    
-    const id = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    if (typeof window !== 'undefined') window.sessionStorage.setItem('chat_session_id', id);
+    if (typeof window === 'undefined') return 'server-session';
+    let id = window.localStorage.getItem('chat-session-id');
+    if (!id) {
+      id = `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      window.localStorage.setItem('chat-session-id', id);
+    }
     return id;
   }, []);
 
+  // Load existing history from server when email/session is known
+  const loadChatHistory = useCallback(async (email?: string) => {
+    if (!email) return;
+    try {
+      console.log('Loading chat history for email:', email);
+      const response = await fetch(`/api/v1/chat/history?email=${encodeURIComponent(email)}&session_id=${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Loaded chat history:', data);
+        if (data.messages && data.messages.length > 0) {
+          // Transform backend format to frontend format
+          const transformedMessages: ChatMessage[] = data.messages.map((m: any, index: number) => ({
+            id: `history-${index}`,
+            message: m.content || '',
+            sender: m.role === 'user' ? 'user' : 'bot',
+            timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+            // Include extra data if present
+            ...(m.extra?.exact_matches && { exact_matches: m.extra.exact_matches }),
+            ...(m.extra?.suggestions && { suggestions: m.extra.suggestions }),
+            ...(m.extra?.orders && { orders: m.extra.orders }),
+            ...(m.extra?.suggested_questions && { suggested_questions: m.extra.suggested_questions }),
+            ...(m.extra?.context_product && { context_product: m.extra.context_product }),
+          }));
+          
+          setMessages(transformedMessages);
+          
+          // Build conversation history from messages
+          const convHistory = data.messages.map((m: any) => ({
+            role: m.role,
+            message: m.content,
+            timestamp: m.created_at
+          }));
+          setConversationHistory(convHistory);
+          
+          // If there were messages, restore search context
+          const lastUserMessage = data.messages
+            .filter((m: any) => m.role === 'user')
+            .pop();
+          if (lastUserMessage) {
+            setLastSearchQuery(lastUserMessage.content || '');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load chat history:', err);
+    }
+  }, [sessionId]);
+
+  // FIXED: Improved sendMessage function with search context storage
   const sendMessage = useCallback(async (
-    message: string, 
-    email?: string, 
+    message: string,
+    email?: string,
     maxResults?: number,
     filters?: Record<string, any>,
     pageNumber?: number
@@ -143,13 +116,12 @@ export const useChat = () => {
       console.log('Message:', message);
       console.log('Selected Product ID:', selectedProductId);
       console.log('Session ID:', sessionId);
-      
-      // ENHANCED: Always send selected product ID to backend
+
       const response: ChatResponse = await sendChatMessage(
         message,
         email,
         sessionId,
-        selectedProductId, // CRITICAL: Always send this
+        selectedProductId,
         conversationHistory,
         maxResults,
         filters,
@@ -157,6 +129,15 @@ export const useChat = () => {
       );
 
       console.log('Response received:', response);
+
+      // FIXED: Store search results for pagination (only for non-pagination requests)
+      if (!message.startsWith('PAGINATION_REQUEST:') && (response.exact_matches?.length > 0)) {
+        setLastSearchQuery(message);
+        // Store all results that could be paginated
+        const allResults = [...(response.exact_matches || []), ...(response.suggestions || [])];
+        setLastSearchResults(allResults);
+        console.log('Stored search results for pagination:', allResults.length);
+      }
 
       // Handle enhanced response with dual sliders
       const exactMatches: any[] = response.exact_matches || [];
@@ -189,7 +170,7 @@ export const useChat = () => {
 
       setMessages(prev => [...prev, botMessage]);
 
-      // ENHANCED: Update context product if provided in response
+      // Update context product if provided in response
       if (response.context_product) {
         setContextProduct(response.context_product);
         console.log('Updated context product from response:', response.context_product.title);
@@ -203,7 +184,7 @@ export const useChat = () => {
       ];
       setConversationHistory(newHistory);
 
-      // ENHANCED: Auto-select first product if no current selection and products available
+      // Auto-select first product if no current selection and products available
       if (!selectedProductId && exactMatches && exactMatches.length > 0) {
         const first = exactMatches[0];
         if (first && first.shopify_id) {
@@ -212,152 +193,218 @@ export const useChat = () => {
           setContextProduct(first);
         }
       }
-
     } catch (err: any) {
       console.error('Chat error:', err);
       setError('Sorry, I encountered an error. Please try again.');
-      
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         message: 'Sorry, I encountered an error. Please try again.',
         sender: 'bot',
         timestamp: new Date(),
       };
-      
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, selectedProductId, conversationHistory]);
+  }, [sessionId, selectedProductId, conversationHistory, sanitizeBotText]);
 
-  const sendQuickQuery = useCallback(async (query: string, options?: {
-    maxResults?: number;
-    priceFilter?: { max: number };
-    brandFilter?: string;
-  }) => {
-    let enhancedQuery = query;
-    
-    if (options?.maxResults) {
-      enhancedQuery += ` (show ${options.maxResults})`;
-    }
-    if (options?.priceFilter?.max) {
-      enhancedQuery += ` under $${options.priceFilter.max}`;
-    }
-    if (options?.brandFilter) {
-      enhancedQuery += ` from ${options.brandFilter}`;
-    }
-    
-    await sendMessage(enhancedQuery);
-  }, [sendMessage]);
+  // FIXED: Improved requestMoreProducts function
+  const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions', page: number = 2) => {
+    console.log('=== REQUESTING MORE PRODUCTS ===');
+    console.log('Type:', type);
+    console.log('Page:', page);
+    console.log('Last search query:', lastSearchQuery);
+    console.log('Session ID:', sessionId);
 
-  // ENHANCED: Better product selection with context update
+    if (!lastSearchQuery) {
+      console.warn('No previous search query found for pagination');
+      setError('No previous search found. Please try a new search.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      // Get current email from localStorage
+      const email = localStorage.getItem('chatEmail');
+
+      // Send the original search query with pagination parameters
+      await sendMessage(
+        lastSearchQuery, // Use the original search query
+        email || undefined,
+        type === 'exact' ? 10 : 5, // More results for the request
+        {}, // filters if needed
+        page // page number
+      );
+
+      console.log('Successfully requested more products');
+    } catch (error) {
+      console.error('Error requesting more products:', error);
+      setError('Failed to load more products. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sendMessage, lastSearchQuery, sessionId]);
+
+  const sendSuggestedQuestion = useCallback(async (question: string, contextProduct?: any) => {
+    console.log('=== SENDING SUGGESTED QUESTION ===');
+    console.log('Question:', question);
+    console.log('Context product provided:', contextProduct?.title || 'None');
+    console.log('Current selected product ID:', selectedProductId);
+    console.log('Current context product:', contextProduct?.title || 'None');
+
+    // If a context product is provided, temporarily set it
+    if (contextProduct && contextProduct.shopify_id) {
+      console.log('Setting context product from suggestion:', contextProduct.title);
+      setSelectedProductId(contextProduct.shopify_id);
+      setContextProduct(contextProduct);
+
+      // Small delay to ensure state is updated before sending
+      setTimeout(() => {
+        const email = localStorage.getItem('chatEmail');
+        sendMessage(question, email || undefined);
+      }, 50);
+    } else {
+      // Send with current context
+      const email = localStorage.getItem('chatEmail');
+      sendMessage(question, email || undefined);
+    }
+  }, [sendMessage, selectedProductId]);
+
   const selectProduct = useCallback((productId: string) => {
     console.log('=== SELECTING PRODUCT ===');
     console.log('Product ID:', productId);
-    console.log('Previous selected ID:', selectedProductId);
-    
     setSelectedProductId(productId);
-    
-    // Find the product in recent messages to set context
-    let foundProduct = null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      
-      // Check both exact matches and suggestions
+
+    // Try to find the product in current messages to set context
+    for (const message of messages) {
       const allProducts = [
-        ...(msg.exact_matches || []),
-        ...(msg.suggestions || []),
-        ...(msg.products || []) // Fallback for old format
+        ...(message.exact_matches || []),
+        ...(message.suggestions || []),
       ];
-      
-      foundProduct = allProducts.find((p: any) => p.shopify_id === productId);
-      if (foundProduct) {
-        console.log('Found and setting context product:', foundProduct.title);
-        setContextProduct(foundProduct);
+      const product = allProducts.find(p => p.shopify_id === productId);
+      if (product) {
+        console.log('Found and set context product:', product.title);
+        setContextProduct(product);
         break;
       }
     }
-
-    if (!foundProduct) {
-      console.warn('Could not find product with ID:', productId);
-    }
-  }, [messages, selectedProductId]);
-
-  // ENHANCED: Context-aware sendSuggestedQuestion
-  const sendSuggestedQuestion = useCallback(async (question: string, messageContextProduct?: any) => {
-    console.log('=== SENDING SUGGESTED QUESTION ===');
-    console.log('Question:', question);
-    console.log('Message context product:', messageContextProduct?.title || 'None');
-    console.log('Global context product:', contextProduct?.title || 'None');
-    console.log('Selected product ID:', selectedProductId);
-    
-    // The backend will handle the context detection properly
-    // Just send the question as-is, with the selected product ID
-    await sendMessage(question);
-  }, [sendMessage, selectedProductId]);
-
-  const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions', page: number = 1) => {
-    // Request more products for pagination
-    const message = type === 'exact' ? 'Show me more results' : 'Show me more suggestions';
-    await sendMessage(message, undefined, undefined, undefined, page);
-  }, [sendMessage]);
-
-  const askAboutProduct = useCallback(async (productNumber: number, question: string) => {
-    // Ask about a specific numbered product
-    const enhancedQuestion = `${question} for product #${productNumber}`;
-    await sendMessage(enhancedQuestion);
-  }, [sendMessage]);
+  }, [messages]);
 
   const clearMessages = useCallback(() => {
-    setMessages([
-      {
-        id: '1',
-        message: "Hello! I'm your AI shopping assistant. I can help you find products with specific requirements like 'show me 2 red shirts under $30' or ask about order status. How can I help you today?",
-        sender: 'bot',
-        timestamp: new Date(),
-      },
-    ]);
-    setError(null);
+    setMessages([]);
+    setConversationHistory([]);
     setSelectedProductId(undefined);
     setContextProduct(null);
-    setConversationHistory([]);
-    
+    setError(null);
+    setLastSearchQuery('');
+    setLastSearchResults([]);
+
     // Clear session storage
     if (typeof window !== 'undefined') {
-      window.sessionStorage.removeItem('chat_session_id');
+      window.localStorage.removeItem('chat-session-id');
+      window.sessionStorage.removeItem('paginationRequest');
     }
   }, []);
 
-  // Get current context information
   const getCurrentContext = useCallback(() => {
     return {
       selectedProductId,
       contextProduct,
-      conversationHistory: conversationHistory.slice(-5) // Last 5 for display
+      conversationHistory: conversationHistory.slice(-4), // Last 4 exchanges
+      sessionId,
     };
-  }, [selectedProductId, contextProduct, conversationHistory]);
+  }, [selectedProductId, contextProduct, conversationHistory, sessionId]);
 
-  // Enhanced filtering helpers
-  const applyFilters = useCallback(async (filters: {
-    maxResults?: number;
-    priceMax?: number;
-    brand?: string;
-    query?: string;
-  }) => {
-    let filterQuery = filters.query || "show me products";
-    
-    if (filters.maxResults) {
-      filterQuery += ` (limit ${filters.maxResults})`;
+  // Quick query for common requests
+  const sendQuickQuery = useCallback(async (
+    query: string,
+    options?: {
+      maxResults?: number;
+      filters?: Record<string, any>;
     }
-    if (filters.priceMax) {
-      filterQuery += ` under $${filters.priceMax}`;
-    }
-    if (filters.brand) {
-      filterQuery += ` from ${filters.brand}`;
-    }
-    
-    await sendMessage(filterQuery);
+  ) => {
+    console.log('=== SENDING QUICK QUERY ===');
+    console.log('Query:', query);
+    console.log('Options:', options);
+
+    const email = localStorage.getItem('chatEmail');
+    await sendMessage(query, email || undefined, options?.maxResults, options?.filters);
   }, [sendMessage]);
+
+  // Ask about a specific product by number
+  const askAboutProduct = useCallback(async (productNumber: number, question: string) => {
+    console.log('=== ASKING ABOUT PRODUCT ===');
+    console.log('Product number:', productNumber);
+    console.log('Question:', question);
+
+    // Find the product by number in the current messages
+    let targetProduct = null;
+    for (const message of messages) {
+      const allProducts = [
+        ...(message.exact_matches || []),
+        ...(message.suggestions || []),
+      ];
+      if (allProducts[productNumber - 1]) {
+        targetProduct = allProducts[productNumber - 1];
+        break;
+      }
+    }
+
+    if (targetProduct) {
+      console.log('Found target product:', targetProduct.title);
+      // Set as selected product and ask the question
+      setSelectedProductId(targetProduct.shopify_id);
+      setContextProduct(targetProduct);
+
+      // Send question about the product
+      const productQuestion = `Regarding product #${productNumber} (${targetProduct.title}): ${question}`;
+      const email = localStorage.getItem('chatEmail');
+      await sendMessage(productQuestion, email || undefined);
+    } else {
+      console.error('Product not found for number:', productNumber);
+      setError(`Product #${productNumber} not found in current results.`);
+    }
+  }, [messages, sendMessage]);
+
+  // Apply filters to current search
+  const applyFilters = useCallback(async (filters: Record<string, any>) => {
+    console.log('=== APPLYING FILTERS ===');
+    console.log('Filters:', filters);
+
+    const email = localStorage.getItem('chatEmail');
+    if (lastSearchQuery) {
+      console.log('Reapplying filters to last search:', lastSearchQuery);
+      await sendMessage(lastSearchQuery, email || undefined, undefined, filters);
+    } else {
+      console.log('No previous search to filter, starting new search');
+      await sendMessage('Show me products with these filters', email || undefined, undefined, filters);
+    }
+  }, [lastSearchQuery, sendMessage]);
+
+  // Initialize with welcome message (only if no history was loaded)
+  useEffect(() => {
+    // Wait a bit to see if history will be loaded
+    const timer = setTimeout(() => {
+      if (messages.length === 0) {
+        const welcomeMessage: ChatMessage = {
+          id: 'welcome',
+          message: 'Welcome! I\'m your AI shopping assistant. How can I help you find products today?',
+          sender: 'bot',
+          timestamp: new Date(),
+          suggested_questions: [
+            'Show me trending products',
+            'Find me a black dress', 
+            'What\'s on sale?',
+            'Help me find a gift'
+          ]
+        };
+        setMessages([welcomeMessage]);
+      }
+    }, 500); // Wait 500ms for history to load
+
+    return () => clearTimeout(timer);
+  }, []); // Only run once on mount
 
   return {
     // Core functionality
@@ -372,11 +419,16 @@ export const useChat = () => {
     contextProduct,
     getCurrentContext,
     sessionId,
-    
+
     // Enhanced functionality
     sendQuickQuery,
-    requestMoreProducts,
+    requestMoreProducts, // FIXED
     askAboutProduct,
     applyFilters,
+    loadChatHistory,
+
+    // Debug info
+    lastSearchQuery,
+    lastSearchResults,
   };
 };
