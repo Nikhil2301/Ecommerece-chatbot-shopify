@@ -201,15 +201,23 @@ def parse_user_preferences(message: str) -> Dict:
     
     return preferences
 
-def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
-    """FIXED: Apply filters to product list with safe price conversion"""
-    if not filters:
+def apply_product_filters(products: List[Dict], filters: Dict, exclude_out_of_stock: bool = True) -> List[Dict]:
+    """FIXED: Apply filters to product list with safe price conversion and stock filtering"""
+    if not products:
         return products
     
     filtered = products
     
+    # ALWAYS filter out-of-stock products unless explicitly disabled
+    if exclude_out_of_stock:
+        filtered = [
+            p for p in filtered
+            if p.get('inventory_quantity', 0) > 0
+        ]
+        logger.info(f"Filtered out-of-stock products: {len(products)} -> {len(filtered)}")
+    
     # Price filter with safe conversion
-    if 'price_filter' in filters and filters['price_filter']:
+    if filters and 'price_filter' in filters and filters['price_filter']:
         max_price = filters['price_filter'].get('max')
         if max_price is not None:
             max_price = float(max_price)
@@ -219,7 +227,7 @@ def apply_product_filters(products: List[Dict], filters: Dict) -> List[Dict]:
             ]
     
     # Brand filter
-    if 'brand_filter' in filters and filters['brand_filter']:
+    if filters and 'brand_filter' in filters and filters['brand_filter']:
         brand = filters['brand_filter'].lower()
         filtered = [p for p in filtered if brand in (p.get('vendor', '') or '').lower()]
     
@@ -704,10 +712,44 @@ async def chat_endpoint(
                     "What products do you have?"
                 ]
 
-        elif intent == "PRODUCT_SEARCH":
-            keywords = extracted_info.get("keywords", [])
-            is_followup = extracted_info.get("is_followup_question", False)
-            question_type = extracted_info.get("question_type", "general")
+        elif intent == "PRODUCT_SEARCH" or chat_message.message.startswith(('LOAD_MORE_EXACT_MATCHES', 'LOAD_MORE_SUGGESTIONS')) or is_more_products_request(chat_message.message):
+            # Handle pagination requests specially
+            is_pagination_request = (chat_message.message.startswith(('LOAD_MORE_EXACT_MATCHES', 'LOAD_MORE_SUGGESTIONS')) or 
+                                   is_more_products_request(chat_message.message))
+            
+            if is_pagination_request:
+                # Extract original query from pagination request
+                if chat_message.message.startswith('LOAD_MORE_EXACT_MATCHES: '):
+                    search_query = chat_message.message.replace('LOAD_MORE_EXACT_MATCHES: ', '').strip()
+                    pagination_type = 'exact'
+                elif chat_message.message.startswith('LOAD_MORE_SUGGESTIONS: '):
+                    search_query = chat_message.message.replace('LOAD_MORE_SUGGESTIONS: ', '').strip()
+                    pagination_type = 'suggestions'
+                elif is_more_products_request(chat_message.message):
+                    # Natural language request - use cached search query
+                    cached_query = session_context[session_id].get('cached_search_query', '')
+                    if cached_query:
+                        search_query = cached_query
+                        pagination_type = 'exact'  # Default to exact matches
+                        logger.info(f"Natural language pagination: '{chat_message.message}' -> using cached query '{search_query}'")
+                    else:
+                        # No cached query - treat as new search
+                        search_query = chat_message.message
+                        pagination_type = 'exact'
+                        is_pagination_request = False  # Reset to new search
+                        logger.info(f"No cached query for natural pagination request, treating as new search")
+                else:
+                    search_query = chat_message.message
+                    pagination_type = 'exact'
+                
+                logger.info(f"PAGINATION REQUEST: {pagination_type} for query '{search_query}', page {current_page}")
+                keywords = [search_query]
+                is_followup = False
+                question_type = "general"
+            else:
+                keywords = extracted_info.get("keywords", [])
+                is_followup = extracted_info.get("is_followup_question", False)
+                question_type = extracted_info.get("question_type", "general")
 
             # Handle "show more like #X" requests
             if user_preferences.get('show_similar_to_id'):
@@ -893,9 +935,21 @@ async def chat_endpoint(
                         logger.info(f"Cached {len(filtered_products)} products for query: {search_query}")
 
                     # PAGINATION: Determine products to show on this page
-                    page_size = 5  # Products per page
+                    # Dynamic page size: larger for "show all" requests, normal for pagination
+                    total_products = len(filtered_products)
+                    
+                    # If total is reasonable (≤50) and it's a natural language request, show more per page
+                    if (total_products <= 50 and 
+                        (is_more_products_request(chat_message.message) or 
+                         chat_message.message.startswith('LOAD_MORE_'))):
+                        page_size = min(total_products, 20)  # Show up to 20 per page for small sets
+                    else:
+                        page_size = 5  # Standard pagination
+                    
                     start_idx = (current_page - 1) * page_size
                     end_idx = start_idx + page_size
+                    
+                    logger.info(f"Using page_size: {page_size} for {total_products} total products")
                     
                     exact_matches = filtered_products[start_idx:end_idx]
                     has_more_exact = end_idx < len(filtered_products)
@@ -949,24 +1003,26 @@ async def chat_endpoint(
                             if price_val is None:
                                 price_val = payload.get("price")
 
-                            suggestion_products.append({
-                                "id": sid,
-                                "shopify_id": sid,
-                                "title": payload.get("title") or "Product",
-                                "description": payload.get("description") or payload.get("body_html") or "",
-                                "price": safe_float_convert(price_val),
-                                "compare_at_price": None,
-                                "vendor": payload.get("vendor") or "",
-                                "product_type": payload.get("product_type") or "",
-                                "tags": payload.get("tags") or "",
-                                "handle": payload.get("handle"),
-                                "status": payload.get("status") or "active",
-                                "inventory_quantity": real_inventory,  # FIXED: Real inventory
-                                "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
-                                "variants_count": len(variants) if isinstance(variants, list) else 0,
-                                "options_count": len(payload.get("options") or []),
-                                "variants": [],
-                            })
+                            # Only add products that are in stock
+                            if real_inventory > 0:
+                                suggestion_products.append({
+                                    "id": sid,
+                                    "shopify_id": sid,
+                                    "title": payload.get("title") or "Product",
+                                    "description": payload.get("description") or payload.get("body_html") or "",
+                                    "price": safe_float_convert(price_val),
+                                    "compare_at_price": None,
+                                    "vendor": payload.get("vendor") or "",
+                                    "product_type": payload.get("product_type") or "",
+                                    "tags": payload.get("tags") or "",
+                                    "handle": payload.get("handle"),
+                                    "status": payload.get("status") or "active",
+                                    "inventory_quantity": real_inventory,  # FIXED: Real inventory
+                                    "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
+                                    "variants_count": len(variants) if isinstance(variants, list) else 0,
+                                    "options_count": len(payload.get("options") or []),
+                                    "variants": [],
+                                })
                     
                     # Apply same filters to suggestions
                     suggestions = apply_product_filters(suggestion_products, filters_to_apply)[:5]
@@ -984,12 +1040,23 @@ async def chat_endpoint(
 
                     # ENHANCED: Generate dynamic response based on results
                     # Special handling for pagination requests
-                    if is_pagination_request:
+                    if is_pagination_request or (hasattr(locals(), 'is_pagination_request') and locals()['is_pagination_request']):
                         showing_start = start_idx + 1
                         showing_end = min(end_idx, total_exact_matches)
-                        response_text = f"Here are products {showing_start}-{showing_end} of {total_exact_matches} matches:"
-                        show_exact_slider = True
-                        show_suggestions_slider = False
+                        
+                        # Different response based on pagination type
+                        if 'pagination_type' in locals() and locals()['pagination_type'] == 'suggestions':
+                            response_text = f"Here are more product suggestions ({showing_start}-{showing_end} of {total_exact_matches}):"
+                            show_exact_slider = False
+                            show_suggestions_slider = True
+                            # For suggestions, move results to suggestions array
+                            suggestions = exact_matches
+                            exact_matches = []
+                        else:
+                            response_text = f"Here are more matching products ({showing_start}-{showing_end} of {total_exact_matches}):"
+                            show_exact_slider = True
+                            show_suggestions_slider = False
+                        
                         suggested_questions = [
                             "Tell me about the first product",
                             "Show me more results" if has_more_exact else "Show me products under $50",
@@ -1081,24 +1148,26 @@ async def chat_endpoint(
                             if price_val is None:
                                 price_val = payload.get("price")
 
-                            suggestion_products.append({
-                                "id": sid,
-                                "shopify_id": sid,
-                                "title": payload.get("title") or "Product",
-                                "description": payload.get("description") or payload.get("body_html") or "",
-                                "price": safe_float_convert(price_val),
-                                "compare_at_price": None,
-                                "vendor": payload.get("vendor") or "",
-                                "product_type": payload.get("product_type") or "",
-                                "tags": payload.get("tags") or "",
-                                "handle": payload.get("handle"),
-                                "status": payload.get("status") or "active",
-                                "inventory_quantity": real_inventory,  # FIXED: Real inventory
-                                "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
-                                "variants_count": len(variants) if isinstance(variants, list) else 0,
-                                "options_count": len(payload.get("options") or []),
-                                "variants": [],
-                            })
+                            # Only add products that are in stock
+                            if real_inventory > 0:
+                                suggestion_products.append({
+                                    "id": sid,
+                                    "shopify_id": sid,
+                                    "title": payload.get("title") or "Product",
+                                    "description": payload.get("description") or payload.get("body_html") or "",
+                                    "price": safe_float_convert(price_val),
+                                    "compare_at_price": None,
+                                    "vendor": payload.get("vendor") or "",
+                                    "product_type": payload.get("product_type") or "",
+                                    "tags": payload.get("tags") or "",
+                                    "handle": payload.get("handle"),
+                                    "status": payload.get("status") or "active",
+                                    "inventory_quantity": real_inventory,  # FIXED: Real inventory
+                                    "images": [{"src": img_src, "alt": payload.get("title")}] if img_src else [],
+                                    "variants_count": len(variants) if isinstance(variants, list) else 0,
+                                    "options_count": len(payload.get("options") or []),
+                                    "variants": [],
+                                })
                     
                     suggestions = suggestion_products[:5]
                     show_suggestions_slider = len(suggestions) > 0
@@ -1115,11 +1184,21 @@ async def chat_endpoint(
 
         elif intent == "ORDER_INQUIRY":
         # Extract order info with enhanced parsing
+            logger.info(f"Processing ORDER_INQUIRY for session {session_id}")
             extracted_info = intent_analysis.get("extracted_info", {})
             order_number = extracted_info.get("order_number")
             email = extracted_info.get("customer_email") or chat_message.email
             specific_query = extracted_info.get("specific_query", "")
             address_type = extracted_info.get("address_type", "")
+            
+            logger.info(f"Initial extraction - Email: {email}, Order Number: {order_number}")
+            logger.info(f"Chat message email: {chat_message.email}")
+            logger.info(f"Extracted customer email: {extracted_info.get('customer_email')}")
+            
+            # ENHANCED: Always prioritize the session email since user already provided it at login
+            if not email and chat_message.email:
+                email = chat_message.email
+                logger.info(f"Using session email: {email}")
             
             # Save newly provided info for future use
             if email:
@@ -1148,18 +1227,22 @@ async def chat_endpoint(
                 email = fallback_info["email"]
                 logger.info(f"Fallback extracted email: {email}")
             
-            # Check what's missing and respond accordingly
-            if not order_number and not email:
-                response_text = "For your privacy and security, I need your order number and email address to look up your order. Please provide both."
-                orders = None
-                suggested_questions = ["My order number is 1234", "My email is user@example.com", "Order 1234, email user@example.com"]
-            elif not order_number:
-                # Have email but no order number
-                response_text = f"Thank you! I have your email ({email}). Now, please provide your order number so I can look up your order details."
-                orders = None
-                suggested_questions = ["My order number is 1234", "Order 1234", "It's order 1234"]
+            logger.info(f"Order inquiry - Email: {email}, Order Number: {order_number}")
+            
+            # IMPROVED: Since user already provided email at login, only ask for order number
+            if not order_number:
+                if not email:
+                    # This should rarely happen since email is from session
+                    response_text = "For your privacy and security, I need your order number and email address to look up your order. Please provide both."
+                    orders = None
+                    suggested_questions = ["My order number is 1234", "My email is user@example.com", "Order 1234, email user@example.com"]
+                else:
+                    # Have email from session, just need order number
+                    response_text = f"Thank you! I have your email ({email}). Now, please provide your order number so I can look up your order details."
+                    orders = None
+                    suggested_questions = ["My order number is 1234", "Order 1234", "It's order 1234"]
             elif not email:
-                # Have order number but no email
+                # This should be rare since we have session email, but handle just in case
                 response_text = f"Thank you! I have your order number ({order_number}). For security, please also provide your email address associated with this order."
                 orders = None
                 suggested_questions = ["My email is user@example.com", "user@example.com", "It's user@example.com"]
@@ -1311,11 +1394,12 @@ async def chat_endpoint(
                 ],
             }
 
-        # Prepare payloads to store
+        # Prepare payloads to store - Don't include context product for order inquiries
         trimmed_exact = [_trim_product(p) for p in (exact_matches or [])[:50]]
         trimmed_suggestions = [_trim_product(p) for p in (suggestions or [])[:50]]
         trimmed_orders = [_trim_order(o) for o in (orders or [])[:50]] if orders else []
-        trimmed_context = _trim_product(context_product) if context_product else None
+        # Only store context product if not an order inquiry or general chat
+        trimmed_context = _trim_product(context_product) if (context_product and intent not in ["ORDER_INQUIRY", "GENERAL_CHAT"]) else None
 
         # === Persist: assistant turn ===
         try:
@@ -1407,6 +1491,14 @@ async def chat_endpoint(
                 pass
         # === End persist assistant turn ===
 
+        # ENHANCED: Don't include product context for order inquiries or general chat
+        response_context_product = context_product if intent not in ["ORDER_INQUIRY", "GENERAL_CHAT"] else None
+        
+        if context_product and intent in ["ORDER_INQUIRY", "GENERAL_CHAT"]:
+            logger.info(f"Excluding context product '{context_product.get('title', 'Unknown')}' from {intent} response")
+        elif context_product:
+            logger.info(f"Including context product '{context_product.get('title', 'Unknown')}' in {intent} response")
+        
         return ChatResponse(
                 response=response_text,
                 intent=intent,
@@ -1414,7 +1506,7 @@ async def chat_endpoint(
                 exact_matches=exact_matches if show_exact_slider else [],
                 suggestions=suggestions if show_suggestions_slider else [],
                 orders=orders,
-                context_product=context_product,  # Always include current context
+                context_product=response_context_product,  # Conditional context based on intent
                 show_exact_slider=show_exact_slider,
                 show_suggestions_slider=show_suggestions_slider,
                 suggested_questions=suggested_questions,
@@ -1450,6 +1542,28 @@ async def chat_endpoint(
             applied_filters={},
             search_metadata={}
         )
+
+def is_more_products_request(message: str) -> bool:
+    """Detect if user is asking for more products/results"""
+    message_lower = message.lower().strip()
+    
+    more_patterns = [
+        r'show\s+me\s+more\s+(?:results?|products?|matches?)',
+        r'(?:more|additional)\s+(?:results?|products?|matches?)',
+        r'load\s+more\s+(?:results?|products?|matches?)',
+        r'see\s+more\s+(?:results?|products?|matches?)',
+        r'get\s+more\s+(?:results?|products?|matches?)',
+        r'show\s+(?:me\s+)?(?:some\s+)?more',
+        r'^more$',
+        r'^next$',
+        r'continue\s+(?:search|showing)',
+    ]
+    
+    for pattern in more_patterns:
+        if re.search(pattern, message_lower):
+            return True
+    
+    return False
 
 def generate_smart_suggestions(product: Dict, last_question_type: str) -> List[str]:
     """Generate intelligent follow-up suggestions based on product and last question"""

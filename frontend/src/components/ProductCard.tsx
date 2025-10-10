@@ -1,7 +1,7 @@
 // # File Path: /Users/nikhil/Sites/localhost/22-sep-11-12-Ai-Ecommerce-Chatbot/frontend/src/components/ProductCard.tsx
 
 import React from 'react';
-import { Star, ShoppingCart, Eye, Tag, Zap } from 'lucide-react';
+import { Star, ShoppingCart, Eye, Tag, Zap, MessageSquare } from 'lucide-react';
 
 interface ProductCardProps {
   product: {
@@ -23,6 +23,7 @@ interface ProductCardProps {
   };
   isSelected?: boolean;
   onClick?: () => void;
+  onReply?: (product: any) => void;
   showCompact?: boolean;
   variant?: 'default' | 'suggestion' | 'featured';
   className?: string;
@@ -32,6 +33,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
   product,
   isSelected = false,
   onClick,
+  onReply,
   showCompact = false,
   variant = 'default',
   className = ""
@@ -128,6 +130,13 @@ const ProductCard: React.FC<ProductCardProps> = ({
             alt={product.images[0].alt || product.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
             loading="lazy"
+            onLoad={() => {
+              // Trigger scroll update after product image loads
+              setTimeout(() => {
+                const event = new CustomEvent('imageLoaded');
+                window.dispatchEvent(event);
+              }, 50);
+            }}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -141,6 +150,20 @@ const ProductCard: React.FC<ProductCardProps> = ({
         
         {/* Quick Action Buttons */}
         <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1">
+          {/* Reply Button */}
+          {onReply && (
+            <button 
+              className="p-1.5 bg-green-500 text-white rounded-full shadow-md hover:bg-green-600 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReply(product);
+              }}
+              title="Reply to this product"
+            >
+              <MessageSquare className="w-4 h-4" />
+            </button>
+          )}
+          
           <button className="p-1.5 bg-white dark:bg-gray-800 rounded-full shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
             <Eye className="w-4 h-4 text-gray-600 dark:text-gray-300" />
           </button>

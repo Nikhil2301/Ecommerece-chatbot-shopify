@@ -26,7 +26,10 @@ export default function FullChatPage() {
     sendSuggestedQuestion,
     requestMoreProducts,
     askAboutProduct,
-    loadChatHistory
+    loadChatHistory,
+    quotedProduct,
+    quoteProduct,
+    clearQuotedProduct
   } = useChat();
 
   // Load chat history on mount - only if no localStorage messages exist
@@ -44,17 +47,65 @@ export default function FullChatPage() {
 
   // Auto-scroll to bottom when messages change or component mounts
   useEffect(() => {
-    scrollToBottom();
+    // Delay scroll to ensure DOM is fully rendered, especially for product cards/images
+    const timeoutId = setTimeout(() => {
+      scrollToBottom();
+    }, 100); // Small delay to ensure content is rendered
+    
+    return () => clearTimeout(timeoutId);
   }, [messages, isLoading]);
 
-  // Initial scroll on page load
+  // Initial scroll on page load with longer delay
   useEffect(() => {
-    scrollToBottom();
+    const timeoutId = setTimeout(() => {
+      scrollToBottom();
+    }, 500); // Longer delay for initial load
+    
+    return () => clearTimeout(timeoutId);
   }, []);
 
-  // Scroll to bottom function
+  // Listen for image load events and re-scroll
+  useEffect(() => {
+    const handleImageLoad = () => {
+      setTimeout(scrollToBottom, 100);
+    };
+    
+    window.addEventListener('imageLoaded', handleImageLoad);
+    return () => {
+      window.removeEventListener('imageLoaded', handleImageLoad);
+    };
+  }, []);
+
+  // Scroll to bottom function with fallback
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      try {
+        // First try smooth scroll
+        messagesEndRef.current.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'end' 
+        });
+        
+        // Fallback: Force scroll if smooth doesn't work
+        setTimeout(() => {
+          if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ 
+              behavior: 'auto', 
+              block: 'end' 
+            });
+          }
+        }, 100);
+      } catch (error) {
+        console.warn('Scroll failed:', error);
+        // Final fallback: scroll container directly
+        const container = messagesEndRef.current.closest('.overflow-auto') || 
+                         messagesEndRef.current.closest('[data-scroll-container]') ||
+                         document.querySelector('.max-w-4xl');
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }
+    }
   };
 
   const goBack = () => {
@@ -139,7 +190,7 @@ export default function FullChatPage() {
         </div>
 
         {/* Chat Container */}
-        <div className="pt-16 pb-20">
+        <div className="pt-16 pb-20" data-scroll-container>
           <div className="max-w-4xl mx-auto px-4">
             {/* Welcome Message - Only show when no messages or just initial message */}
             {messages.length <= 1 && (
@@ -191,6 +242,7 @@ export default function FullChatPage() {
                   onSendSuggestedQuestion={handleSendSuggestedQuestion}
                   onRequestMore={handleRequestMore}
                   onAskAboutProduct={handleAskAboutProduct}
+                  onQuoteProduct={quoteProduct}
                 />
               ))}
             </div>
@@ -228,7 +280,12 @@ export default function FullChatPage() {
         {/* Fixed Chat Input */}
         <div className={`fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 shadow-lg ${isMinimized ? 'hidden' : ''}`}>
           <div className="max-w-4xl mx-auto p-4">
-            <ChatInput onSendMessage={sendMessage} isLoading={isLoading} />
+            <ChatInput 
+              onSendMessage={sendMessage} 
+              isLoading={isLoading}
+              quotedProduct={quotedProduct}
+              onClearQuote={clearQuotedProduct}
+            />
           </div>
         </div>
 

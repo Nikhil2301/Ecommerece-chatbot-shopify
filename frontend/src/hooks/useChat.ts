@@ -2,7 +2,7 @@
 // Path: /frontend/src/hooks/useChat.ts
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ChatMessage, ChatResponse } from '@/types';
+import { ChatMessage, ChatResponse, IntentType } from '@/types';
 import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
@@ -22,14 +22,42 @@ export const useChat = () => {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
-  const [contextProduct, setContextProduct] = useState<any | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('selectedProductId') || undefined;
+    }
+    return undefined;
+  });
+  const [contextProduct, setContextProduct] = useState<any | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('contextProduct');
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch (e) {
+          console.warn('Failed to parse stored context product:', e);
+        }
+      }
+    }
+    return null;
+  });
   const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+  const [quotedProduct, setQuotedProduct] = useState<any | null>(null);
 
-  // FIXED: Add states for pagination context
+  // FIXED: Add states for pagination context with localStorage initialization
   const [lastSearchResults, setLastSearchResults] = useState<any[]>([]);
-  const [lastSearchQuery, setLastSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1); // Track current page number
+  const [lastSearchQuery, setLastSearchQuery] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('lastSearchQuery') || '';
+    }
+    return '';
+  });
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseInt(localStorage.getItem('currentPage') || '1', 10);
+    }
+    return 1;
+  });
 
   // Sanitize bot bold markers so raw ** doesn't appear
   const sanitizeBotText = useCallback((text: string): string => {
@@ -104,6 +132,143 @@ export const useChat = () => {
     }
   }, [sessionId]);
 
+// NEW: Intelligent context change detection
+  const detectContextChange = useCallback((message: string, currentContext?: any) => {
+    console.log('=== DETECTING CONTEXT CHANGE ===');
+    console.log('Message:', message);
+    console.log('Current context product:', currentContext?.title || 'None');
+    
+    const messageLower = message.toLowerCase().trim();
+    
+    // Define patterns for different types of queries
+    const newProductSearchPatterns = [
+      // Direct product searches
+      'show\\s+me\\s+(?:some\\s+)?(?:a\\s+)?(?:\\d+\\s+)?([a-zA-Z\\s]+)(?:dress|shirt|jacket|pants|shoes|bag|watch|ring|necklace|earrings|top|bottom|skirt|coat|sweater|hoodie|jeans|shorts|sneakers|boots|sandals|hat|cap|belt|scarf|sunglasses|handbag|backpack|wallet)',
+      'find\\s+me\\s+(?:some\\s+)?(?:a\\s+)?(?:\\d+\\s+)?([a-zA-Z\\s]+)',
+      'looking\\s+for\\s+(?:some\\s+)?(?:a\\s+)?(?:\\d+\\s+)?([a-zA-Z\\s]+)',
+      'search\\s+for\\s+(?:some\\s+)?(?:a\\s+)?(?:\\d+\\s+)?([a-zA-Z\\s]+)',
+      '(?:i\\s+)?(?:want|need)\\s+(?:some\\s+)?(?:a\\s+)?(?:\\d+\\s+)?([a-zA-Z\\s]+)',
+      // Color/size specific searches
+      '(?:show|find|get)\\s+me\\s+.*?(?:color|size|in|with)',
+      // Category searches
+      '(?:show|find|get)\\s+me\\s+.*?(?:under|below|above|over)\\s+\\$\\d+',
+    ];
+    
+    const orderRelatedPatterns = [
+      // Direct order requests
+      '\\b(?:order|orders)\\s+(?:details?|info|information|status)\\b',
+      '\\b(?:give|show|tell)\\s+me.{0,20}\\border',
+      '\\b(?:my|the)\\s+order',
+      '\\border\\s+(?:number|#)\\s*\\d+',
+      // Tracking related
+      '\\b(?:track|tracking)\\b',
+      '\\b(?:shipping|delivery)\\s+(?:status|info|details?)',
+      '\\bwhere\\s+is\\s+my',
+      '\\bwhen\\s+will\\s+(?:it|my\\s+order)',
+      // Status inquiries
+      '\\b(?:order|shipping|delivery)\\s+status\\b',
+      '\\bstatus\\s+of\\s+(?:my\\s+)?order\\b',
+    ];
+    
+    const generalQuestionPatterns = [
+      '^(?:hi|hello|hey|thanks|thank\\s+you)\\b',
+      '\\b(?:help|support|contact|phone|email|address)\\b',
+      '\\b(?:policy|return|refund|exchange|shipping|delivery)\\b',
+      '\\b(?:how\\s+(?:to|do|can)|what\\s+(?:is|are)|where\\s+(?:is|are)|when\\s+(?:is|are))\\b',
+      '\\b(?:store|location|hours|open|close)\\b',
+    ];
+    
+    // Check if this is a new product search
+    const isNewProductSearch = newProductSearchPatterns.some(pattern => {
+      const regex = new RegExp(pattern, 'i');
+      return regex.test(messageLower);
+    });
+    
+    // Check if this is an order-related query
+    const isOrderQuery = orderRelatedPatterns.some(pattern => {
+      const regex = new RegExp(pattern, 'i');
+      return regex.test(messageLower);
+    });
+    
+    // Check if this is a general question
+    const isGeneralQuestion = generalQuestionPatterns.some(pattern => {
+      const regex = new RegExp(pattern, 'i');
+      return regex.test(messageLower);
+    });
+    
+    // If we have current context, check if message relates to it
+    let relatedToCurrentContext = false;
+    if (currentContext && currentContext.title) {
+      const contextWords = currentContext.title.toLowerCase().split(/\s+/).filter((word: string) => word.length > 2);
+      const messageWords = messageLower.split(/\s+/);
+      
+      // Check if message contains significant words from current product
+      const matchingWords = contextWords.filter((word: string) => 
+        messageWords.some((msgWord: string) => msgWord.includes(word) || word.includes(msgWord))
+      );
+      
+      // Also check for product-specific questions that don't mention the product name
+      const productSpecificQuestions = [
+        '\\b(?:what|which)\\s+(?:colors?|sizes?|materials?)\\b',
+        '\\b(?:is\\s+(?:this|it)\\s+(?:available|in\\s+stock))\\b',
+        '\\b(?:how\\s+much|what.s\\s+the\\s+price|cost)\\b',
+        '\\b(?:show\\s+me\\s+(?:images?|photos?))\\b',
+        '\\b(?:tell\\s+me\\s+(?:about|more))\\b',
+        '\\b(?:similar\\s+(?:products?|items?))\\b',
+      ];
+      
+      const isProductSpecific = productSpecificQuestions.some(pattern => {
+        const regex = new RegExp(pattern, 'i');
+        return regex.test(messageLower);
+      });
+      
+      relatedToCurrentContext = matchingWords.length > 0 || isProductSpecific;
+    }
+    
+    console.log('Analysis results:', {
+      isNewProductSearch,
+      isOrderQuery,
+      isGeneralQuestion,
+      relatedToCurrentContext,
+      hasCurrentContext: !!currentContext
+    });
+    
+    // Determine intent
+    let intent: IntentType | 'RELATED_TO_CURRENT' | 'NONE' = 'NONE';
+    if (relatedToCurrentContext) intent = 'RELATED_TO_CURRENT';
+    else if (isOrderQuery) intent = 'ORDER_INQUIRY';
+    else if (isGeneralQuestion) intent = 'GENERAL_CHAT';
+    else if (isNewProductSearch) intent = 'PRODUCT_SEARCH';
+
+    // Decision logic
+    const shouldClearContext = !!currentContext && (intent === 'ORDER_INQUIRY' || intent === 'GENERAL_CHAT' || intent === 'PRODUCT_SEARCH') && !relatedToCurrentContext;
+    const reasonMap: Record<string, string> = {
+      RELATED_TO_CURRENT: 'Message relates to current context',
+      ORDER_INQUIRY: 'Order-related query detected',
+      GENERAL_CHAT: 'General question detected',
+      PRODUCT_SEARCH: 'New product search detected',
+      NONE: currentContext ? 'No clear context change detected' : 'No current context to clear'
+    };
+
+    return { shouldClearContext, reason: reasonMap[intent || 'NONE'], intent };
+  }, []);
+
+  // NEW: Clear context when topic changes
+  const clearProductContext = useCallback((reason?: string) => {
+    console.log('=== CLEARING PRODUCT CONTEXT ===');
+    if (reason) console.log('Reason:', reason);
+    setSelectedProductId(undefined);
+    setContextProduct(null);
+    localStorage.removeItem('selectedProductId');
+    localStorage.removeItem('contextProduct');
+  }, []);
+
+  // NEW: Clear quoted product
+  const clearQuotedProduct = useCallback(() => {
+    console.log('=== CLEARING QUOTED PRODUCT ===');
+    setQuotedProduct(null);
+  }, []);
+
   // FIXED: Improved sendMessage function with search context storage
   const sendMessage = useCallback(async (
     message: string,
@@ -114,11 +279,37 @@ export const useChat = () => {
   ) => {
     if (!message.trim()) return;
 
+    // NEW: Intelligent context change detection
+    const trimmedMessage = message.trim();
+    
+    // Check if we should clear product context based on the message
+    const contextChangeResult = detectContextChange(trimmedMessage, contextProduct);
+    console.log('Context change analysis:', contextChangeResult);
+
+    // Determine if this is a non-product intent (order/general)
+    const isNonProductIntent = contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT';
+    
+    if (contextChangeResult.shouldClearContext) {
+      console.log(`Clearing product context: ${contextChangeResult.reason}`);
+      clearProductContext(contextChangeResult.reason);
+      // Also clear quoted product if it's related to the old context
+      if (quotedProduct && contextProduct && quotedProduct.shopify_id === contextProduct.shopify_id) {
+        console.log('Also clearing quoted product as it relates to cleared context');
+        clearQuotedProduct();
+      }
+    }
+
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      message: message.trim(),
+      message: trimmedMessage,
       sender: 'user',
       timestamp: new Date(),
+      // Include quoted product in user message for display
+      reply_to: quotedProduct ? {
+        message: `Product: ${quotedProduct.title}`,
+        timestamp: new Date(),
+        product: quotedProduct
+      } : undefined,
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -131,11 +322,14 @@ export const useChat = () => {
       console.log('Selected Product ID:', selectedProductId);
       console.log('Session ID:', sessionId);
 
+      // Ensure we do not send a selected product ID when context was cleared for this message
+      const selectedProductIdForRequest = contextChangeResult.shouldClearContext ? undefined : selectedProductId;
+
       const response: ChatResponse = await sendChatMessage(
         message,
         email,
         sessionId,
-        selectedProductId,
+        selectedProductIdForRequest,
         conversationHistory,
         maxResults,
         filters,
@@ -145,13 +339,20 @@ export const useChat = () => {
       console.log('Response received:', response);
 
       // FIXED: Store search results for pagination (only for non-pagination requests)
-      if (!message.startsWith('PAGINATION_REQUEST:')) {
+      if (!message.startsWith('LOAD_MORE_EXACT_MATCHES:') && !message.startsWith('LOAD_MORE_SUGGESTIONS:')) {
         setLastSearchQuery(message);
         // Store all results that could be paginated
         const allResults = [...(response.exact_matches || []), ...(response.suggestions || [])];
         setLastSearchResults(allResults);
         setCurrentPage(1); // Reset to page 1 for new search
         console.log('Stored search results for pagination:', allResults.length);
+        
+        // Also store in localStorage for persistence across page refreshes
+        localStorage.setItem('lastSearchQuery', message);
+        localStorage.setItem('currentPage', '1');
+      } else {
+        // For pagination requests, just update the current page
+        console.log('Pagination request - keeping existing search context');
       }
 
       // Handle enhanced response with dual sliders
@@ -159,7 +360,12 @@ export const useChat = () => {
       const suggestions: any[] = response.suggestions || [];
       const orders = response.orders || [];
 
-      // Create enhanced bot response message
+      // Create enhanced bot response message with reply context
+      // Decide whether to include product context in the reply (avoid for non-product intents)
+      const replyProduct = (contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT')
+        ? undefined
+        : (quotedProduct || contextProduct || response.context_product);
+
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         message: sanitizeBotText(response.response),
@@ -170,7 +376,7 @@ export const useChat = () => {
         suggestions: suggestions.length > 0 ? suggestions : undefined,
         orders: orders.length > 0 ? orders : undefined,
         suggested_questions: response.suggested_questions || [],
-        context_product: response.context_product,
+        context_product: (contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT') ? undefined : response.context_product,
         show_exact_slider: response.show_exact_slider,
         show_suggestions_slider: response.show_suggestions_slider,
         // Enhanced metadata
@@ -181,13 +387,29 @@ export const useChat = () => {
         has_more_suggestions: response.has_more_suggestions,
         applied_filters: response.applied_filters,
         search_metadata: response.search_metadata,
+        // Reply context - what this bot message is responding to
+        reply_to: {
+          message: userMessage.message,
+          timestamp: userMessage.timestamp,
+          product: replyProduct
+        }
       };
+
+      // NOTE: Don't clear quoted product here - wait for bot response
+      // The quote should persist until the bot responds to maintain context
 
       setMessages(prev => [...prev, botMessage]);
 
-      // Update context product if provided in response
-      if (response.context_product) {
+      // Clear quoted product after bot response is added
+      if (quotedProduct) {
+        console.log('Clearing quoted product after bot response');
+        setQuotedProduct(null);
+      }
+
+      // Update context product if provided in response and intent is product-related
+      if (response.context_product && !(contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT')) {
         setContextProduct(response.context_product);
+        localStorage.setItem('contextProduct', JSON.stringify(response.context_product));
         console.log('Updated context product from response:', response.context_product.title);
       }
 
@@ -199,29 +421,40 @@ export const useChat = () => {
       ];
       setConversationHistory(newHistory);
 
-      // Auto-select first product if no current selection and products available
-      if (!selectedProductId && exactMatches && exactMatches.length > 0) {
-        const first = exactMatches[0];
-        if (first && first.shopify_id) {
-          console.log('Auto-selecting first product:', first.title);
-          setSelectedProductId(first.shopify_id);
-          setContextProduct(first);
+      // Auto-select first product if no current selection and products available (only for product-related intents)
+      if (!(contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT')) {
+        if (!selectedProductId && exactMatches && exactMatches.length > 0) {
+          const first = exactMatches[0];
+          if (first && first.shopify_id) {
+            console.log('Auto-selecting first product:', first.title);
+            setSelectedProductId(first.shopify_id);
+            setContextProduct(first);
+            localStorage.setItem('selectedProductId', first.shopify_id);
+            localStorage.setItem('contextProduct', JSON.stringify(first));
+          }
         }
       }
     } catch (err: any) {
-      console.error('Chat error:', err);
-      setError('Sorry, I encountered an error. Please try again.');
-      const errorMessage: ChatMessage = {
+      console.error('=== CHAT ERROR DETAILS ===');
+      console.error('Error object:', err);
+      console.error('Error message:', err?.message || 'Unknown error');
+      console.error('Error stack:', err?.stack);
+      
+      const errorMessage = err?.message || 'Sorry, I encountered an error. Please try again.';
+      console.error('Setting error state to:', errorMessage);
+      
+      setError(errorMessage);
+      const errorChatMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
-        message: 'Sorry, I encountered an error. Please try again.',
+        message: `Error: ${errorMessage}`,
         sender: 'bot',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [...prev, errorChatMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, selectedProductId, conversationHistory, sanitizeBotText]);
+  }, [sessionId, selectedProductId, conversationHistory, sanitizeBotText, detectContextChange, contextProduct, quotedProduct, clearProductContext, clearQuotedProduct]);
 
   // FIXED: Improved requestMoreProducts function
   const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions') => {
@@ -246,20 +479,28 @@ export const useChat = () => {
       // Increment page for next set of results
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
+      localStorage.setItem('currentPage', nextPage.toString());
 
-      // Send the original search query with pagination parameters
+      // FIXED: Send a specific pagination request instead of original query
+      const paginationMessage = type === 'exact' 
+        ? 'LOAD_MORE_EXACT_MATCHES' 
+        : 'LOAD_MORE_SUGGESTIONS';
+      
+      // Send the pagination request with the original search context
       await sendMessage(
-        lastSearchQuery, // Use the original search query
+        `${paginationMessage}: ${lastSearchQuery}`,
         email || undefined,
-        undefined, // Don't override max_results - use backend default
+        undefined, // Don't override max_results
         {}, // filters if needed
         nextPage // page number
       );
 
-      console.log(`Successfully requested page ${nextPage}`);
+      console.log(`Successfully requested page ${nextPage} for ${type}`);
     } catch (error) {
       console.error('Error requesting more products:', error);
       setError('Failed to load more products. Please try again.');
+      // Reset page on error
+      setCurrentPage(currentPage);
     } finally {
       setIsLoading(false);
     }
@@ -277,6 +518,8 @@ export const useChat = () => {
       console.log('Setting context product from suggestion:', contextProduct.title);
       setSelectedProductId(contextProduct.shopify_id);
       setContextProduct(contextProduct);
+      localStorage.setItem('selectedProductId', contextProduct.shopify_id);
+      localStorage.setItem('contextProduct', JSON.stringify(contextProduct));
 
       // Small delay to ensure state is updated before sending
       setTimeout(() => {
@@ -294,6 +537,7 @@ export const useChat = () => {
     console.log('=== SELECTING PRODUCT ===');
     console.log('Product ID:', productId);
     setSelectedProductId(productId);
+    localStorage.setItem('selectedProductId', productId);
 
     // Try to find the product in current messages to set context
     for (const message of messages) {
@@ -305,16 +549,27 @@ export const useChat = () => {
       if (product) {
         console.log('Found and set context product:', product.title);
         setContextProduct(product);
+        localStorage.setItem('contextProduct', JSON.stringify(product));
         break;
       }
     }
   }, [messages]);
+
+  // NEW: Quote product for reply
+  const quoteProduct = useCallback((product: any) => {
+    console.log('=== QUOTING PRODUCT ===');
+    console.log('Product:', product.title);
+    setQuotedProduct(product);
+  }, []);
+
+
 
   const clearMessages = useCallback(() => {
     setMessages([]);
     setConversationHistory([]);
     setSelectedProductId(undefined);
     setContextProduct(null);
+    setQuotedProduct(null); // Clear quoted product too
     setError(null);
     setLastSearchQuery('');
     setLastSearchResults([]);
@@ -324,6 +579,10 @@ export const useChat = () => {
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('chat-session-id');
       window.localStorage.removeItem('chatMessages'); // Also clear saved messages
+      window.localStorage.removeItem('lastSearchQuery');
+      window.localStorage.removeItem('currentPage');
+      window.localStorage.removeItem('selectedProductId');
+      window.localStorage.removeItem('contextProduct');
       window.sessionStorage.removeItem('paginationRequest');
     }
   }, []);
@@ -377,6 +636,8 @@ export const useChat = () => {
       // Set as selected product and ask the question
       setSelectedProductId(targetProduct.shopify_id);
       setContextProduct(targetProduct);
+      localStorage.setItem('selectedProductId', targetProduct.shopify_id);
+      localStorage.setItem('contextProduct', JSON.stringify(targetProduct));
 
       // Send question about the product
       const productQuestion = `Regarding product #${productNumber} (${targetProduct.title}): ${question}`;
@@ -454,6 +715,11 @@ export const useChat = () => {
     askAboutProduct,
     applyFilters,
     loadChatHistory,
+
+    // NEW: Product quoting functionality
+    quotedProduct,
+    quoteProduct,
+    clearQuotedProduct,
 
     // Debug info
     lastSearchQuery,

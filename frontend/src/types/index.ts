@@ -30,6 +30,11 @@ export interface ChatMessage {
   // Interaction helpers
   suggested_questions?: string[];
   context_product?: Product;
+  reply_to?: {
+    message: string;
+    timestamp?: Date | string;
+    product?: Product;
+  };
 }
 
 export interface Product {
