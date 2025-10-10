@@ -6,7 +6,20 @@ import { ChatMessage, ChatResponse } from '@/types';
 import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (typeof window !== 'undefined') {
+      const savedMessages = localStorage.getItem('chatMessages');
+      if (savedMessages) {
+        try {
+          return JSON.parse(savedMessages);
+        } catch (e) {
+          console.error('Could not parse chat messages from local storage', e);
+          return [];
+        }
+      }
+    }
+    return [];
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
@@ -16,6 +29,7 @@ export const useChat = () => {
   // FIXED: Add states for pagination context
   const [lastSearchResults, setLastSearchResults] = useState<any[]>([]);
   const [lastSearchQuery, setLastSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1); // Track current page number
 
   // Sanitize bot bold markers so raw ** doesn't appear
   const sanitizeBotText = useCallback((text: string): string => {
@@ -131,11 +145,12 @@ export const useChat = () => {
       console.log('Response received:', response);
 
       // FIXED: Store search results for pagination (only for non-pagination requests)
-      if (!message.startsWith('PAGINATION_REQUEST:') && (response.exact_matches?.length > 0)) {
+      if (!message.startsWith('PAGINATION_REQUEST:')) {
         setLastSearchQuery(message);
         // Store all results that could be paginated
         const allResults = [...(response.exact_matches || []), ...(response.suggestions || [])];
         setLastSearchResults(allResults);
+        setCurrentPage(1); // Reset to page 1 for new search
         console.log('Stored search results for pagination:', allResults.length);
       }
 
@@ -209,10 +224,10 @@ export const useChat = () => {
   }, [sessionId, selectedProductId, conversationHistory, sanitizeBotText]);
 
   // FIXED: Improved requestMoreProducts function
-  const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions', page: number = 2) => {
+  const requestMoreProducts = useCallback(async (type: 'exact' | 'suggestions') => {
     console.log('=== REQUESTING MORE PRODUCTS ===');
     console.log('Type:', type);
-    console.log('Page:', page);
+    console.log('Current page:', currentPage);
     console.log('Last search query:', lastSearchQuery);
     console.log('Session ID:', sessionId);
 
@@ -228,23 +243,27 @@ export const useChat = () => {
       // Get current email from localStorage
       const email = localStorage.getItem('chatEmail');
 
+      // Increment page for next set of results
+      const nextPage = currentPage + 1;
+      setCurrentPage(nextPage);
+
       // Send the original search query with pagination parameters
       await sendMessage(
         lastSearchQuery, // Use the original search query
         email || undefined,
-        type === 'exact' ? 10 : 5, // More results for the request
+        undefined, // Don't override max_results - use backend default
         {}, // filters if needed
-        page // page number
+        nextPage // page number
       );
 
-      console.log('Successfully requested more products');
+      console.log(`Successfully requested page ${nextPage}`);
     } catch (error) {
       console.error('Error requesting more products:', error);
       setError('Failed to load more products. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [sendMessage, lastSearchQuery, sessionId]);
+  }, [sendMessage, lastSearchQuery, sessionId, currentPage]);
 
   const sendSuggestedQuestion = useCallback(async (question: string, contextProduct?: any) => {
     console.log('=== SENDING SUGGESTED QUESTION ===');
@@ -299,10 +318,12 @@ export const useChat = () => {
     setError(null);
     setLastSearchQuery('');
     setLastSearchResults([]);
+    setCurrentPage(1); // Reset pagination
 
     // Clear session storage
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('chat-session-id');
+      window.localStorage.removeItem('chatMessages'); // Also clear saved messages
       window.sessionStorage.removeItem('paginationRequest');
     }
   }, []);
@@ -404,7 +425,14 @@ export const useChat = () => {
     }, 500); // Wait 500ms for history to load
 
     return () => clearTimeout(timer);
-  }, []); // Only run once on mount
+  }, [messages.length]); // Re-check if history is empty
+
+  // Save messages to local storage whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chatMessages', JSON.stringify(messages));
+    }
+  }, [messages]);
 
   return {
     // Core functionality

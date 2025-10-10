@@ -65,7 +65,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const hasAppliedFilters = message.applied_filters && Object.keys(message.applied_filters).length > 0;
 
   const formatTimestamp = (timestamp: Date) => {
-    return timestamp.toLocaleTimeString('en-US', {
+    // Ensure timestamp is a valid Date object
+    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+
+    // Check if the date is valid
+    if (isNaN(date.getTime())) {
+      return 'Invalid date';
+    }
+
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true

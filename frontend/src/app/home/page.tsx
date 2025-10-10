@@ -29,12 +29,16 @@ export default function FullChatPage() {
     loadChatHistory
   } = useChat();
 
-  // Load chat history on mount
+  // Load chat history on mount - only if no localStorage messages exist
   useEffect(() => {
     const email = typeof window !== 'undefined' ? localStorage.getItem('chatEmail') : null;
-    if (email) {
-      console.log('Loading chat history on mount for:', email);
+    const savedMessages = typeof window !== 'undefined' ? localStorage.getItem('chatMessages') : null;
+
+    if (email && !savedMessages) {
+      console.log('Loading chat history from backend for:', email);
       loadChatHistory(email);
+    } else if (savedMessages) {
+      console.log('Using saved messages from localStorage');
     }
   }, [loadChatHistory]);
 

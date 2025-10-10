@@ -564,6 +564,12 @@ async def chat_endpoint(
                 'selected_product': None,  # NEW: Track currently selected product
                 'pending_order_email': None,  # NEW: Remember email for order inquiry
                 'pending_order_number': None,  # NEW: Remember order number for order inquiry
+                # PAGINATION: Cache search results for pagination
+                'cached_search_results': [],  # Full list of products from last search
+                'cached_search_query': '',  # The query that generated cached results
+                'cached_suggestions': [],  # Full list of suggestions
+                'current_exact_page': 1,  # Current page for exact matches
+                'current_suggestions_page': 1,  # Current page for suggestions
             }
 
         # ENHANCED: Handle selected product ID from frontend
@@ -778,14 +784,28 @@ async def chat_endpoint(
                     search_query = chat_message.message
                 logger.info(f"Searching for: {search_query}")
 
-                # Determine search limit based on user preference or default
-                max_results = user_preferences.get('max_results') or 50  # Default higher for filtering
-                search_limit = min(max_results * 2, 100)  # Search more to account for filtering
+                # PAGINATION FIX: Check if this is a pagination request for cached results
+                is_pagination_request = False
+                cached_query = session_context[session_id].get('cached_search_query', '')
+                cached_results = session_context[session_id].get('cached_search_results', [])
+                
+                # Check if query matches cached query (for pagination)
+                if cached_query and cached_results and search_query.lower() == cached_query.lower():
+                    if chat_message.page_number and chat_message.page_number > 1:
+                        is_pagination_request = True
+                        logger.info(f"PAGINATION REQUEST detected: page {chat_message.page_number} of cached results")
 
-                # Search vector database
-                product_results = vector_service.search_products(search_query, limit=search_limit)
+                if is_pagination_request and cached_results:
+                    # Use cached results for pagination
+                    logger.info(f"Using {len(cached_results)} cached results for pagination")
+                    all_products = cached_results
+                else:
+                    # New search - query vector database
+                    max_results = user_preferences.get('max_results') or 50  # Default higher for filtering
+                    search_limit = min(max_results * 2, 100)  # Search more to account for filtering
+                    product_results = vector_service.search_products(search_query, limit=search_limit)
 
-                if product_results:
+                if not is_pagination_request and product_results:
                     # Process results into exact matches
                     all_products = []
                     
@@ -866,17 +886,21 @@ async def chat_endpoint(
                     filtered_products = apply_product_filters(all_products, filters_to_apply)
                     total_exact_matches = len(filtered_products)
 
-                    # Determine exact matches to show
-                    max_exact_display = user_preferences.get('max_results') or 5
-                    if user_preferences.get('max_results') == 1:
-                        max_exact_display = 1
-                    
-                    page_size = 5
+                    # CACHE: Store filtered results for pagination (only for new searches)
+                    if not is_pagination_request:
+                        session_context[session_id]['cached_search_results'] = filtered_products
+                        session_context[session_id]['cached_search_query'] = search_query
+                        logger.info(f"Cached {len(filtered_products)} products for query: {search_query}")
+
+                    # PAGINATION: Determine products to show on this page
+                    page_size = 5  # Products per page
                     start_idx = (current_page - 1) * page_size
-                    end_idx = start_idx + max_exact_display
+                    end_idx = start_idx + page_size
                     
                     exact_matches = filtered_products[start_idx:end_idx]
                     has_more_exact = end_idx < len(filtered_products)
+                    
+                    logger.info(f"Showing products {start_idx+1}-{min(end_idx, len(filtered_products))} of {total_exact_matches} (page {current_page})")
 
                     # Generate numbered product mapping for "show me more like #X"
                     numbered_products = {}
@@ -959,7 +983,19 @@ async def chat_endpoint(
                         logger.info(f"Set new context product: {context_product['title']}")
 
                     # ENHANCED: Generate dynamic response based on results
-                    if user_preferences.get('max_results') == 1:
+                    # Special handling for pagination requests
+                    if is_pagination_request:
+                        showing_start = start_idx + 1
+                        showing_end = min(end_idx, total_exact_matches)
+                        response_text = f"Here are products {showing_start}-{showing_end} of {total_exact_matches} matches:"
+                        show_exact_slider = True
+                        show_suggestions_slider = False
+                        suggested_questions = [
+                            "Tell me about the first product",
+                            "Show me more results" if has_more_exact else "Show me products under $50",
+                            "What colors are available for product 1?",
+                        ]
+                    elif user_preferences.get('max_results') == 1:
                         if exact_matches:
                             response_text = f"Here's the product that matches your search: **{exact_matches[0]['title']}**"
                             show_exact_slider = True
