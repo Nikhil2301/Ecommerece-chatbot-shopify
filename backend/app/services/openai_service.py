@@ -553,7 +553,13 @@ Items Ordered:
         
         # Add line items
         for item in order.get("line_items", []):
-            item_text = f"- {item.get('quantity', 1)}x {item.get('title', item.get('name', 'Unknown'))} ({item.get('price', 'N/A')} each)"
+            # Handle both dict and OrderLineItem objects
+            if hasattr(item, 'quantity'):  # It's an OrderLineItem
+                item_name = getattr(item, 'title', getattr(item, 'name', 'Unknown'))
+                item_price = f"${getattr(item, 'price', 'N/A')}" if hasattr(item, 'price') else 'N/A'
+                item_text = f"- {getattr(item, 'quantity', 1)}x {item_name} ({item_price} each)"
+            else:  # It's a dict
+                item_text = f"- {item.get('quantity', 1)}x {item.get('title', item.get('name', 'Unknown'))} (${item.get('price', 'N/A')} each)"
             order_text += item_text + "\n"
         
         # Add addresses if available

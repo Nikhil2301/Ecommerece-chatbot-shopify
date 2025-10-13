@@ -1,7 +1,8 @@
-// # File Path: /Users/nikhil/Sites/localhost/22-sep-11-12-Ai-Ecommerce-Chatbot/frontend/src/components/ProductCard.tsx
+// Fixed ProductCard Component - Reply Button Restored + Functional Buy & View Buttons
+// File: frontend/src/components/ProductCard.tsx
 
 import React from 'react';
-import { Star, ShoppingCart, Eye, Tag, Zap, MessageSquare } from 'lucide-react';
+import { Star, ShoppingCart, Eye, Tag, Zap, MessageSquare, ExternalLink } from 'lucide-react';
 
 interface ProductCardProps {
   product: {
@@ -14,6 +15,7 @@ interface ProductCardProps {
     vendor?: string;
     product_type?: string;
     tags?: string;
+    handle?: string;
     images?: Array<{
       src: string;
       alt?: string;
@@ -56,12 +58,74 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   const hasDiscount = product.compare_at_price && 
     parseFloat(product.compare_at_price.toString()) > parseFloat(product.price.toString());
-  
+    
   const discountPercent = hasDiscount ? 
     calculateDiscount(product.price, product.compare_at_price!) : 0;
-
+    
   const isOutOfStock = product.inventory_quantity === 0;
-  
+
+  // ENHANCED: Generate proper product URLs
+  const generateProductUrl = (handle?: string, shopifyId?: string) => {
+    if (handle) {
+      return `/products/${handle}`;
+    } else if (shopifyId) {
+      return `/products/id/${shopifyId}`;
+    }
+    return '#';
+  };
+
+  const generateBuyUrl = (handle?: string, shopifyId?: string) => {
+    if (handle) {
+      return `/cart/add?id=${handle}&quantity=1`;
+    } else if (shopifyId) {
+      return `/cart/add?id=${shopifyId}&quantity=1`;
+    }
+    return '#';
+  };
+
+  // ENHANCED: Handle Buy button click
+  const handleBuyClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (isOutOfStock) {
+      alert('This product is currently out of stock');
+      return;
+    }
+
+    const buyUrl = generateBuyUrl(product.handle, product.shopify_id);
+    
+    if (buyUrl === '#') {
+      handleViewClick(e);
+      return;
+    }
+
+    // Navigate to buy URL
+    window.location.href = buyUrl;
+  };
+
+  // ENHANCED: Handle View button click
+  const handleViewClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    const productUrl = generateProductUrl(product.handle, product.shopify_id);
+    
+    if (productUrl === '#') {
+      const productInfo = `
+Product: ${product.title}
+Price: ${formatPrice(product.price)}
+${product.vendor ? `Vendor: ${product.vendor}` : ''}
+${product.description ? `Description: ${product.description.replace(/<[^>]*>/g, '').substring(0, 100)}...` : ''}
+${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
+      `.trim();
+      
+      alert(productInfo);
+      return;
+    }
+
+    // Open product page in new tab
+    window.open(productUrl, '_blank');
+  };
+
   // Variant-specific styling
   const getVariantStyles = () => {
     switch (variant) {
@@ -93,45 +157,41 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   return (
     <div 
-      className={`relative rounded-xl border shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group ${styles.cardClass} ${
-        isSelected ? 'ring-2 ring-blue-400 shadow-lg' : ''
-      } ${showCompact ? 'p-3' : 'p-4'} ${className}`}
+      className={`relative rounded-lg border shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden ${styles.cardClass} ${isSelected ? 'ring-2 ring-blue-500' : ''} ${className}`}
       onClick={onClick}
     >
       {/* Variant Badge */}
       {variant !== 'default' && (
-        <div className={`absolute top-2 right-2 z-10 px-2 py-1 rounded-full text-xs font-medium flex items-center space-x-1 ${styles.badgeClass}`}>
+        <div className={`absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full ${styles.badgeClass}`}>
           {styles.badgeIcon}
-          <span>{styles.badgeText}</span>
+          {styles.badgeText}
         </div>
       )}
 
       {/* Discount Badge */}
       {hasDiscount && (
-        <div className="absolute top-2 left-2 z-10 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-bold">
+        <div className="absolute top-2 right-2 z-10 bg-red-500 text-white px-2 py-1 text-xs font-bold rounded">
           -{discountPercent}%
         </div>
       )}
 
       {/* Out of Stock Overlay */}
       {isOutOfStock && (
-        <div className="absolute inset-0 bg-gray-900 bg-opacity-50 rounded-xl flex items-center justify-center z-20">
-          <span className="bg-gray-800 text-white px-3 py-1 rounded-full text-sm font-medium">
+        <div className="absolute inset-0 bg-gray-900/50 flex items-center justify-center z-20">
+          <span className="bg-gray-800 text-white px-4 py-2 rounded-lg font-semibold">
             Out of Stock
           </span>
         </div>
       )}
 
       {/* Product Image */}
-      <div className={`relative ${showCompact ? 'h-32' : 'h-40'} bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden mb-3`}>
+      <div className="aspect-w-1 aspect-h-1 w-full">
         {product.images && product.images.length > 0 ? (
-          <img
-            src={product.images[0].src}
+          <img 
+            src={product.images[0].src} 
             alt={product.images[0].alt || product.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-            loading="lazy"
+            className="w-full h-48 object-cover"
             onLoad={() => {
-              // Trigger scroll update after product image loads
               setTimeout(() => {
                 const event = new CustomEvent('imageLoaded');
                 window.dispatchEvent(event);
@@ -139,99 +199,139 @@ const ProductCard: React.FC<ProductCardProps> = ({
             }}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="text-gray-400 dark:text-gray-600">
-              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2 2z" />
-              </svg>
-            </div>
+          <div className="w-full h-48 bg-gray-200 flex items-center justify-center">
+            <Tag className="w-12 h-12 text-gray-400" />
           </div>
         )}
-        
-        {/* Quick Action Buttons */}
-        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1">
-          {/* Reply Button */}
-          {onReply && (
-            <button 
-              className="p-1.5 bg-green-500 text-white rounded-full shadow-md hover:bg-green-600 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                onReply(product);
-              }}
-              title="Reply to this product"
-            >
-              <MessageSquare className="w-4 h-4" />
-            </button>
-          )}
-          
-          <button className="p-1.5 bg-white dark:bg-gray-800 rounded-full shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            <Eye className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+      </div>
+
+      {/* RESTORED: Quick Action Buttons */}
+      <div className="absolute top-12 right-2 z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity">
+        {/* RESTORED: Reply Button - First Priority */}
+        {onReply && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onReply(product);
+            }}
+            className="p-2 bg-green-500/90 hover:bg-green-600 text-white rounded-full shadow-sm transition-colors"
+            title="Reply to this product"
+          >
+            <MessageSquare className="w-4 h-4" />
           </button>
-          {!isOutOfStock && (
-            <button className="p-1.5 bg-blue-500 text-white rounded-full shadow-md hover:bg-blue-600 transition-colors">
-              <ShoppingCart className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        )}
+
+        {/* View Button */}
+        <button
+          onClick={handleViewClick}
+          className="p-2 bg-gray-500/90 hover:bg-gray-600 text-white rounded-full shadow-sm transition-colors"
+          title="View product details"
+        >
+          <Eye className="w-4 h-4" />
+        </button>
+
+        {/* Buy Button */}
+        {!isOutOfStock && (
+          <button
+            onClick={handleBuyClick}
+            className="p-2 bg-blue-500/90 hover:bg-blue-600 text-white rounded-full shadow-sm transition-colors"
+            title="Add to cart"
+          >
+            <ShoppingCart className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Product Info */}
-      <div className="space-y-2">
+      <div className="p-4 group">
         {/* Vendor */}
         {product.vendor && (
-          <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
-            <Tag className="w-3 h-3 mr-1" />
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">
             {product.vendor}
-          </div>
+          </p>
         )}
 
         {/* Title */}
-        <h3 className={`font-semibold text-gray-800 dark:text-gray-100 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${
-          showCompact ? 'text-sm' : 'text-base'
-        }`}>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 line-clamp-2">
           {product.title}
         </h3>
 
         {/* Description - only show in non-compact mode */}
         {!showCompact && product.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
             {product.description.replace(/<[^>]*>/g, '').substring(0, 100)}...
           </p>
         )}
 
         {/* Price */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className={`font-bold text-gray-900 dark:text-gray-100 ${showCompact ? 'text-sm' : 'text-lg'}`}>
-              {formatPrice(product.price)}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
+            {formatPrice(product.price)}
+          </span>
+          {hasDiscount && (
+            <span className="text-sm text-gray-500 line-through">
+              {formatPrice(product.compare_at_price!)}
             </span>
-            {hasDiscount && (
-              <span className="text-sm text-gray-500 dark:text-gray-400 line-through">
-                {formatPrice(product.compare_at_price!)}
-              </span>
-            )}
-          </div>
+          )}
+        </div>
 
-          {/* Stock Status */}
-          <div className="flex items-center">
-            {product.inventory_quantity !== undefined && (
-              <span className={`text-xs text-gray-500 dark:text-gray-400 ${isOutOfStock ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>
-                {isOutOfStock ? 'Out of stock' : `${product.inventory_quantity} left`}
-              </span>
-            )}
-          </div>
+        {/* Stock Status */}
+        {product.inventory_quantity !== undefined && (
+          <p className={`text-xs mb-2 ${isOutOfStock ? 'text-red-600' : 'text-green-600'}`}>
+            {isOutOfStock ? 'Out of stock' : `${product.inventory_quantity} left`}
+          </p>
+        )}
+
+        {/* ENHANCED: Action Buttons Row */}
+        <div className="flex gap-2 mt-3">
+          {/* RESTORED: Reply Button - Always Visible */}
+          {onReply && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReply(product);
+              }}
+              className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-white bg-green-500 hover:bg-green-600 rounded transition-colors"
+            >
+              <MessageSquare className="w-3 h-3" />
+              Reply
+            </button>
+          )}
+
+          {/* View Button */}
+          <button
+            onClick={handleViewClick}
+            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" />
+            View
+          </button>
+
+          {/* Buy Button */}
+          <button
+            onClick={handleBuyClick}
+            disabled={isOutOfStock}
+            className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded transition-colors ${
+              isOutOfStock 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                : 'bg-blue-500 hover:bg-blue-600 text-white'
+            }`}
+          >
+            <ShoppingCart className="w-3 h-3" />
+            {isOutOfStock ? 'Sold Out' : 'Buy'}
+          </button>
         </div>
 
         {/* Additional Info */}
         {!showCompact && (
-          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
             {product.product_type && (
-              <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+              <span className="bg-gray-100 px-2 py-1 rounded">
                 {product.product_type}
               </span>
             )}
             {product.variants_count && product.variants_count > 1 && (
-              <span>
+              <span className="bg-gray-100 px-2 py-1 rounded">
                 {product.variants_count} variants
               </span>
             )}
@@ -241,13 +341,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
       {/* Selection Indicator */}
       {isSelected && (
-        <div className="absolute inset-0 pointer-events-none rounded-xl">
-          <div className="absolute top-3 right-3 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-          </div>
-        </div>
+        <div className="absolute inset-0 border-2 border-blue-500 rounded-lg pointer-events-none" />
       )}
     </div>
   );

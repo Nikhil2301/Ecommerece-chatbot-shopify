@@ -3452,52 +3452,27 @@ def get_history(
 
         )
 
-    
-
     if not session:
-
         return {"session_id": None, "messages": []}
 
-    
-
     # Fetch messages oldest → newest
-
     msgs = (
-
         db.query(ChatMessage)
-
         .filter(ChatMessage.session_id == session.id)
-
         .order_by(asc(ChatMessage.created_at))
-
         .limit(limit)
-
         .all()
-
     )
 
-    
-
     return {
-
         "session_id": session.id,
-
         "messages": [
-
             {
-
                 "role": m.role,
-
                 "content": m.content,
-
                 "created_at": m.created_at.isoformat() if m.created_at else None,
-
                 "extra": m.extra,
-
             }
-
             for m in msgs
-
         ],
-
     }
