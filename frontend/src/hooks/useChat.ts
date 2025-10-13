@@ -1,8 +1,11 @@
-// File: useChat.ts - Complete fixed version with auto-scroll and pagination
+// File: useChat.ts - Enhanced version with product context persistence fix
+
 // Path: /frontend/src/hooks/useChat.ts
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
+
 import { ChatMessage, ChatResponse, IntentType } from '@/types';
+
 import { sendChatMessage } from '@/utils/api';
 
 export const useChat = () => {
@@ -20,15 +23,19 @@ export const useChat = () => {
     }
     return [];
   });
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ENHANCED: Product context state management with persistence
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('selectedProductId') || undefined;
     }
     return undefined;
   });
-  const [contextProduct, setContextProduct] = useState<any | null>(() => {
+
+  const [contextProduct, setContextProduct] = useState<any>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('contextProduct');
       if (stored) {
@@ -41,8 +48,9 @@ export const useChat = () => {
     }
     return null;
   });
+
   const [conversationHistory, setConversationHistory] = useState<any[]>([]);
-  const [quotedProduct, setQuotedProduct] = useState<any | null>(null);
+  const [quotedProduct, setQuotedProduct] = useState<any>(null);
 
   // FIXED: Add states for pagination context with localStorage initialization
   const [lastSearchResults, setLastSearchResults] = useState<any[]>([]);
@@ -52,6 +60,7 @@ export const useChat = () => {
     }
     return '';
   });
+
   const [currentPage, setCurrentPage] = useState(() => {
     if (typeof window !== 'undefined') {
       return parseInt(localStorage.getItem('currentPage') || '1', 10);
@@ -62,7 +71,6 @@ export const useChat = () => {
   // Sanitize bot bold markers so raw ** doesn't appear
   const sanitizeBotText = useCallback((text: string): string => {
     if (!text) return text;
-
     // Preserve **Image N:** markers for ChatMessage image rendering
     return text.replace(/\*\*([^*]+)\*\*/g, (match, p1) => {
       const trimmed = String(p1).trim();
@@ -83,6 +91,30 @@ export const useChat = () => {
     }
     return id;
   }, []);
+
+  // ENHANCED: Persist context product to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (contextProduct) {
+        localStorage.setItem('contextProduct', JSON.stringify(contextProduct));
+        console.log('Context product persisted:', contextProduct.title);
+      } else {
+        localStorage.removeItem('contextProduct');
+      }
+    }
+  }, [contextProduct]);
+
+  // ENHANCED: Persist selected product ID to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (selectedProductId) {
+        localStorage.setItem('selectedProductId', selectedProductId);
+        console.log('Selected product ID persisted:', selectedProductId);
+      } else {
+        localStorage.removeItem('selectedProductId');
+      }
+    }
+  }, [selectedProductId]);
 
   // Load existing history from server when email/session is known
   const loadChatHistory = useCallback(async (email?: string) => {
@@ -107,9 +139,9 @@ export const useChat = () => {
             ...(m.extra?.suggested_questions && { suggested_questions: m.extra.suggested_questions }),
             ...(m.extra?.context_product && { context_product: m.extra.context_product }),
           }));
-          
+
           setMessages(transformedMessages);
-          
+
           // Build conversation history from messages
           const convHistory = data.messages.map((m: any) => ({
             role: m.role,
@@ -117,7 +149,18 @@ export const useChat = () => {
             timestamp: m.created_at
           }));
           setConversationHistory(convHistory);
+
+          // ENHANCED: Restore context from last message if available
+          const lastBotMessage = data.messages
+            .filter((m: any) => m.role === 'assistant')
+            .pop();
           
+          if (lastBotMessage?.extra?.context_product && lastBotMessage?.extra?.selected_product_id) {
+            console.log('Restoring context from chat history:', lastBotMessage.extra.context_product.title);
+            setContextProduct(lastBotMessage.extra.context_product);
+            setSelectedProductId(lastBotMessage.extra.selected_product_id);
+          }
+
           // If there were messages, restore search context
           const lastUserMessage = data.messages
             .filter((m: any) => m.role === 'user')
@@ -132,14 +175,14 @@ export const useChat = () => {
     }
   }, [sessionId]);
 
-// NEW: Intelligent context change detection
+  // NEW: Intelligent context change detection
   const detectContextChange = useCallback((message: string, currentContext?: any) => {
     console.log('=== DETECTING CONTEXT CHANGE ===');
     console.log('Message:', message);
     console.log('Current context product:', currentContext?.title || 'None');
-    
+
     const messageLower = message.toLowerCase().trim();
-    
+
     // Define patterns for different types of queries
     const newProductSearchPatterns = [
       // Direct product searches
@@ -153,7 +196,7 @@ export const useChat = () => {
       // Category searches
       '(?:show|find|get)\\s+me\\s+.*?(?:under|below|above|over)\\s+\\$\\d+',
     ];
-    
+
     const orderRelatedPatterns = [
       // Direct order requests
       '\\b(?:order|orders)\\s+(?:details?|info|information|status)\\b',
@@ -169,7 +212,7 @@ export const useChat = () => {
       '\\b(?:order|shipping|delivery)\\s+status\\b',
       '\\bstatus\\s+of\\s+(?:my\\s+)?order\\b',
     ];
-    
+
     const generalQuestionPatterns = [
       '^(?:hi|hello|hey|thanks|thank\\s+you)\\b',
       '\\b(?:help|support|contact|phone|email|address)\\b',
@@ -177,37 +220,37 @@ export const useChat = () => {
       '\\b(?:how\\s+(?:to|do|can)|what\\s+(?:is|are)|where\\s+(?:is|are)|when\\s+(?:is|are))\\b',
       '\\b(?:store|location|hours|open|close)\\b',
     ];
-    
+
     // Check if this is a new product search
     const isNewProductSearch = newProductSearchPatterns.some(pattern => {
       const regex = new RegExp(pattern, 'i');
       return regex.test(messageLower);
     });
-    
+
     // Check if this is an order-related query
     const isOrderQuery = orderRelatedPatterns.some(pattern => {
       const regex = new RegExp(pattern, 'i');
       return regex.test(messageLower);
     });
-    
+
     // Check if this is a general question
     const isGeneralQuestion = generalQuestionPatterns.some(pattern => {
       const regex = new RegExp(pattern, 'i');
       return regex.test(messageLower);
     });
-    
-    // If we have current context, check if message relates to it
+
+    // CRITICAL: Check if message relates to current context (product-specific questions)
     let relatedToCurrentContext = false;
     if (currentContext && currentContext.title) {
       const contextWords = currentContext.title.toLowerCase().split(/\s+/).filter((word: string) => word.length > 2);
       const messageWords = messageLower.split(/\s+/);
-      
+
       // Check if message contains significant words from current product
-      const matchingWords = contextWords.filter((word: string) => 
+      const matchingWords = contextWords.filter((word: string) =>
         messageWords.some((msgWord: string) => msgWord.includes(word) || word.includes(msgWord))
       );
-      
-      // Also check for product-specific questions that don't mention the product name
+
+      // ENHANCED: Check for product-specific questions that don't mention the product name
       const productSpecificQuestions = [
         '\\b(?:what|which)\\s+(?:colors?|sizes?|materials?)\\b',
         '\\b(?:is\\s+(?:this|it)\\s+(?:available|in\\s+stock))\\b',
@@ -215,16 +258,18 @@ export const useChat = () => {
         '\\b(?:show\\s+me\\s+(?:images?|photos?))\\b',
         '\\b(?:tell\\s+me\\s+(?:about|more))\\b',
         '\\b(?:similar\\s+(?:products?|items?))\\b',
+        '\\b(?:and\\s+)?(?:what|how)\\s+(?:about|is)\\s+(?:the\\s+)?(?:price|cost|size|color|material)\\b', // NEW: "and what about the price?"
+        '\\b(?:what\\s+)?(?:sizes?|colors?|options?)\\s+(?:are\\s+)?(?:available)\\b', // NEW: "what sizes are available?"
       ];
-      
+
       const isProductSpecific = productSpecificQuestions.some(pattern => {
         const regex = new RegExp(pattern, 'i');
         return regex.test(messageLower);
       });
-      
+
       relatedToCurrentContext = matchingWords.length > 0 || isProductSpecific;
     }
-    
+
     console.log('Analysis results:', {
       isNewProductSearch,
       isOrderQuery,
@@ -232,7 +277,7 @@ export const useChat = () => {
       relatedToCurrentContext,
       hasCurrentContext: !!currentContext
     });
-    
+
     // Determine intent
     let intent: IntentType | 'RELATED_TO_CURRENT' | 'NONE' = 'NONE';
     if (relatedToCurrentContext) intent = 'RELATED_TO_CURRENT';
@@ -240,8 +285,11 @@ export const useChat = () => {
     else if (isGeneralQuestion) intent = 'GENERAL_CHAT';
     else if (isNewProductSearch) intent = 'PRODUCT_SEARCH';
 
-    // Decision logic
-    const shouldClearContext = !!currentContext && (intent === 'ORDER_INQUIRY' || intent === 'GENERAL_CHAT' || intent === 'PRODUCT_SEARCH') && !relatedToCurrentContext;
+    // CRITICAL: Only clear context for definitively different topics
+    const shouldClearContext = !!currentContext && 
+      (intent === 'ORDER_INQUIRY' || intent === 'GENERAL_CHAT' || intent === 'PRODUCT_SEARCH') && 
+      !relatedToCurrentContext;
+
     const reasonMap: Record<string, string> = {
       RELATED_TO_CURRENT: 'Message relates to current context',
       ORDER_INQUIRY: 'Order-related query detected',
@@ -269,7 +317,7 @@ export const useChat = () => {
     setQuotedProduct(null);
   }, []);
 
-  // FIXED: Improved sendMessage function with search context storage
+  // ENHANCED: Improved sendMessage function with context persistence
   const sendMessage = useCallback(async (
     message: string,
     email?: string,
@@ -281,14 +329,14 @@ export const useChat = () => {
 
     // NEW: Intelligent context change detection
     const trimmedMessage = message.trim();
-    
-    // Check if we should clear product context based on the message
+
+    // CRITICAL: Check if we should clear product context based on the message
     const contextChangeResult = detectContextChange(trimmedMessage, contextProduct);
     console.log('Context change analysis:', contextChangeResult);
 
     // Determine if this is a non-product intent (order/general)
     const isNonProductIntent = contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT';
-    
+
     if (contextChangeResult.shouldClearContext) {
       console.log(`Clearing product context: ${contextChangeResult.reason}`);
       clearProductContext(contextChangeResult.reason);
@@ -299,16 +347,17 @@ export const useChat = () => {
       }
     }
 
+    // ENHANCED: Create user message with context information
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       message: trimmedMessage,
       sender: 'user',
       timestamp: new Date(),
-      // Include quoted product in user message for display
-      reply_to: quotedProduct ? {
-        message: `Product: ${quotedProduct.title}`,
+      // CRITICAL: Include reply_to context for user messages when there's a selected product
+      reply_to: (selectedProductId && contextProduct && !contextChangeResult.shouldClearContext) ? {
+        message: trimmedMessage,
         timestamp: new Date(),
-        product: quotedProduct
+        product: contextProduct
       } : undefined,
     };
 
@@ -320,16 +369,19 @@ export const useChat = () => {
       console.log('=== SENDING MESSAGE ===');
       console.log('Message:', message);
       console.log('Selected Product ID:', selectedProductId);
+      console.log('Context cleared for this message:', contextChangeResult.shouldClearContext);
       console.log('Session ID:', sessionId);
 
-      // Ensure we do not send a selected product ID when context was cleared for this message
+      // CRITICAL: Send selected product ID unless context was cleared for this message
       const selectedProductIdForRequest = contextChangeResult.shouldClearContext ? undefined : selectedProductId;
+
+      console.log('Sending selected_product_id to backend:', selectedProductIdForRequest);
 
       const response: ChatResponse = await sendChatMessage(
         message,
         email,
         sessionId,
-        selectedProductIdForRequest,
+        selectedProductIdForRequest, // This is the key fix!
         conversationHistory,
         maxResults,
         filters,
@@ -346,7 +398,6 @@ export const useChat = () => {
         setLastSearchResults(allResults);
         setCurrentPage(1); // Reset to page 1 for new search
         console.log('Stored search results for pagination:', allResults.length);
-        
         // Also store in localStorage for persistence across page refreshes
         localStorage.setItem('lastSearchQuery', message);
         localStorage.setItem('currentPage', '1');
@@ -360,11 +411,11 @@ export const useChat = () => {
       const suggestions: any[] = response.suggestions || [];
       const orders = response.orders || [];
 
-      // Create enhanced bot response message with reply context
+      // ENHANCED: Create bot response message with proper reply context
       // Decide whether to include product context in the reply (avoid for non-product intents)
       const replyProduct = (contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT')
         ? undefined
-        : (quotedProduct || contextProduct || response.context_product);
+        : (contextProduct || response.context_product);
 
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -387,16 +438,13 @@ export const useChat = () => {
         has_more_suggestions: response.has_more_suggestions,
         applied_filters: response.applied_filters,
         search_metadata: response.search_metadata,
-        // Reply context - what this bot message is responding to
+        // ENHANCED: Reply context - what this bot message is responding to
         reply_to: {
           message: userMessage.message,
           timestamp: userMessage.timestamp,
           product: replyProduct
         }
       };
-
-      // NOTE: Don't clear quoted product here - wait for bot response
-      // The quote should persist until the bot responds to maintain context
 
       setMessages(prev => [...prev, botMessage]);
 
@@ -406,11 +454,17 @@ export const useChat = () => {
         setQuotedProduct(null);
       }
 
-      // Update context product if provided in response and intent is product-related
+      // CRITICAL: Update context product if provided in response and intent is product-related
       if (response.context_product && !(contextChangeResult.intent === 'ORDER_INQUIRY' || contextChangeResult.intent === 'GENERAL_CHAT')) {
+        console.log('=== UPDATING CONTEXT FROM BACKEND ===');
+        console.log('Backend context product:', response.context_product.title);
         setContextProduct(response.context_product);
-        localStorage.setItem('contextProduct', JSON.stringify(response.context_product));
-        console.log('Updated context product from response:', response.context_product.title);
+        
+        // Also update selected product ID if not already set
+        if (!selectedProductId) {
+          setSelectedProductId(response.context_product.shopify_id);
+          console.log('Auto-setting selected product ID from backend context:', response.context_product.shopify_id);
+        }
       }
 
       // Update conversation history
@@ -429,21 +483,20 @@ export const useChat = () => {
             console.log('Auto-selecting first product:', first.title);
             setSelectedProductId(first.shopify_id);
             setContextProduct(first);
-            localStorage.setItem('selectedProductId', first.shopify_id);
-            localStorage.setItem('contextProduct', JSON.stringify(first));
           }
         }
       }
+
     } catch (err: any) {
       console.error('=== CHAT ERROR DETAILS ===');
       console.error('Error object:', err);
       console.error('Error message:', err?.message || 'Unknown error');
       console.error('Error stack:', err?.stack);
-      
+
       const errorMessage = err?.message || 'Sorry, I encountered an error. Please try again.';
       console.error('Setting error state to:', errorMessage);
-      
       setError(errorMessage);
+
       const errorChatMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         message: `Error: ${errorMessage}`,
@@ -472,20 +525,18 @@ export const useChat = () => {
 
     try {
       setIsLoading(true);
-
       // Get current email from localStorage
       const email = localStorage.getItem('chatEmail');
-
       // Increment page for next set of results
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       localStorage.setItem('currentPage', nextPage.toString());
 
       // FIXED: Send a specific pagination request instead of original query
-      const paginationMessage = type === 'exact' 
-        ? 'LOAD_MORE_EXACT_MATCHES' 
+      const paginationMessage = type === 'exact'
+        ? 'LOAD_MORE_EXACT_MATCHES'
         : 'LOAD_MORE_SUGGESTIONS';
-      
+
       // Send the pagination request with the original search context
       await sendMessage(
         `${paginationMessage}: ${lastSearchQuery}`,
@@ -506,6 +557,7 @@ export const useChat = () => {
     }
   }, [sendMessage, lastSearchQuery, sessionId, currentPage]);
 
+  // ENHANCED: Send suggested question with context preservation
   const sendSuggestedQuestion = useCallback(async (question: string, contextProduct?: any) => {
     console.log('=== SENDING SUGGESTED QUESTION ===');
     console.log('Question:', question);
@@ -518,9 +570,7 @@ export const useChat = () => {
       console.log('Setting context product from suggestion:', contextProduct.title);
       setSelectedProductId(contextProduct.shopify_id);
       setContextProduct(contextProduct);
-      localStorage.setItem('selectedProductId', contextProduct.shopify_id);
-      localStorage.setItem('contextProduct', JSON.stringify(contextProduct));
-
+      
       // Small delay to ensure state is updated before sending
       setTimeout(() => {
         const email = localStorage.getItem('chatEmail');
@@ -531,14 +581,14 @@ export const useChat = () => {
       const email = localStorage.getItem('chatEmail');
       sendMessage(question, email || undefined);
     }
-  }, [sendMessage, selectedProductId]);
+  }, [sendMessage, selectedProductId, setSelectedProductId, setContextProduct]);
 
+  // ENHANCED: Select product with context management
   const selectProduct = useCallback((productId: string) => {
     console.log('=== SELECTING PRODUCT ===');
     console.log('Product ID:', productId);
     setSelectedProductId(productId);
-    localStorage.setItem('selectedProductId', productId);
-
+    
     // Try to find the product in current messages to set context
     for (const message of messages) {
       const allProducts = [
@@ -549,20 +599,22 @@ export const useChat = () => {
       if (product) {
         console.log('Found and set context product:', product.title);
         setContextProduct(product);
-        localStorage.setItem('contextProduct', JSON.stringify(product));
         break;
       }
     }
-  }, [messages]);
+  }, [messages, setSelectedProductId, setContextProduct]);
 
-  // NEW: Quote product for reply
+  // ENHANCED: Quote product for reply with context setting
   const quoteProduct = useCallback((product: any) => {
     console.log('=== QUOTING PRODUCT ===');
     console.log('Product:', product.title);
+    console.log('Setting as selected product and context');
+    
+    // When quoting, also set as selected and context
     setQuotedProduct(product);
+    setSelectedProductId(product.shopify_id);
+    setContextProduct(product);
   }, []);
-
-
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -607,7 +659,6 @@ export const useChat = () => {
     console.log('=== SENDING QUICK QUERY ===');
     console.log('Query:', query);
     console.log('Options:', options);
-
     const email = localStorage.getItem('chatEmail');
     await sendMessage(query, email || undefined, options?.maxResults, options?.filters);
   }, [sendMessage]);
@@ -636,8 +687,6 @@ export const useChat = () => {
       // Set as selected product and ask the question
       setSelectedProductId(targetProduct.shopify_id);
       setContextProduct(targetProduct);
-      localStorage.setItem('selectedProductId', targetProduct.shopify_id);
-      localStorage.setItem('contextProduct', JSON.stringify(targetProduct));
 
       // Send question about the product
       const productQuestion = `Regarding product #${productNumber} (${targetProduct.title}): ${question}`;
@@ -653,7 +702,6 @@ export const useChat = () => {
   const applyFilters = useCallback(async (filters: Record<string, any>) => {
     console.log('=== APPLYING FILTERS ===');
     console.log('Filters:', filters);
-
     const email = localStorage.getItem('chatEmail');
     if (lastSearchQuery) {
       console.log('Reapplying filters to last search:', lastSearchQuery);
@@ -676,7 +724,7 @@ export const useChat = () => {
           timestamp: new Date(),
           suggested_questions: [
             'Show me trending products',
-            'Find me a black dress', 
+            'Find me a black dress',
             'What\'s on sale?',
             'Help me find a gift'
           ]
@@ -716,7 +764,7 @@ export const useChat = () => {
     applyFilters,
     loadChatHistory,
 
-    // NEW: Product quoting functionality
+    // ENHANCED: Product quoting functionality with context persistence
     quotedProduct,
     quoteProduct,
     clearQuotedProduct,

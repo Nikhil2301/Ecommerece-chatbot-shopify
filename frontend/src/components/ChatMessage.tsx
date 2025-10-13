@@ -1,5 +1,6 @@
 // File Path: /frontend/src/components/ChatMessage.tsx
-// Complete fixed version with working "See more matches" functionality
+
+// ENHANCED version with persistent product context display
 
 import React, { useState } from 'react';
 import { Bot, User, Clock, MessageSquare, Lightbulb, ChevronRight, Filter, Star, Eye, EyeOff, ShoppingBag, Package, Heart } from 'lucide-react';
@@ -61,7 +62,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const [showImagesAsText, setShowImagesAsText] = useState(false);
 
   const isBot = message.sender === 'bot';
-
+  
   // Support both new dual slider format and legacy format
   const exactMatches = message.exact_matches || (message.show_exact_slider !== false ? message.products : []) || [];
   const suggestions = message.suggestions || [];
@@ -74,12 +75,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const formatTimestamp = (timestamp: Date | string) => {
     // Ensure timestamp is a valid Date object
     const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-
+    
     // Check if the date is valid
     if (isNaN(date.getTime())) {
       return 'Invalid date';
     }
-
+    
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -110,15 +111,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const imageUrlPattern = /\*\*Image \d+:\*\*\s*(https?:\/\/[^\s\n]+)/g;
     const matches = [];
     let match;
+    
     while ((match = imageUrlPattern.exec(text)) !== null) {
       matches.push(match[1]);
     }
+    
     return matches;
   };
 
   // NEW: Function to check if message contains product images
   const containsProductImages = (text: string): boolean => {
-    return /Here are the available images for/.test(text) &&
+    return /Here are the available images for/.test(text) && 
            /\*\*Image \d+:\*\*/.test(text);
   };
 
@@ -126,7 +129,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const renderMessageContent = (text: string) => {
     if (!containsProductImages(text)) {
       // Regular message - render as normal
-      return <span className="whitespace-pre-wrap">{text}</span>;
+      return <div className="whitespace-pre-wrap">{text}</div>;
     }
 
     // Extract product title and images
@@ -135,30 +138,26 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const imageUrls = extractImageUrls(text);
 
     if (imageUrls.length === 0) {
-      return <span className="whitespace-pre-wrap">{text}</span>;
+      return <div className="whitespace-pre-wrap">{text}</div>;
     }
 
     return (
       <div className="space-y-3">
-        <p className="text-sm">Here are the available images for <strong>{productTitle}</strong>:</p>
-
+        <p>Here are the available images for <strong>{productTitle}</strong>:</p>
+        
         {/* Toggle button for image view */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setShowImagesAsText(!showImagesAsText)}
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
-          >
-            {showImagesAsText ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-            {showImagesAsText ? 'Show URLs' : 'Show Images'}
-          </button>
-          <span className="text-xs text-gray-500">
-            {imageUrls.length} image{imageUrls.length !== 1 ? 's' : ''} found
-          </span>
-        </div>
+        <button
+          onClick={() => setShowImagesAsText(!showImagesAsText)}
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+        >
+          {showImagesAsText ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+          {showImagesAsText ? 'Show URLs' : 'Show Images'}
+          <span className="text-gray-500">({imageUrls.length} image{imageUrls.length !== 1 ? 's' : ''} found)</span>
+        </button>
 
         {showImagesAsText ? (
           // Show as text URLs (original format)
-          <div className="space-y-2">
+          <div className="space-y-1">
             {imageUrls.map((url, index) => (
               <div key={index} className="text-sm">
                 <strong>Image {index + 1}:</strong>{' '}
@@ -170,13 +169,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           </div>
         ) : (
           // Show actual images
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {imageUrls.map((url, index) => (
               <div key={index} className="relative group">
                 <img
                   src={url}
-                  alt={`Image ${index + 1} of ${productTitle}`}
-                  className="w-full h-64 object-cover rounded-lg border border-gray-200"
+                  alt={`${productTitle} - Image ${index + 1}`}
+                  className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
                   onLoad={() => {
                     // Trigger a scroll check after image loads
                     setTimeout(() => {
@@ -190,23 +189,26 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     e.currentTarget.alt = 'Image failed to load';
                   }}
                 />
+                
                 {/* Image overlay with number */}
-                <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white text-xs px-2 py-1 rounded">
+                <div className="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
                   {index + 1}
                 </div>
+                
                 {/* Click to view full size */}
                 <a 
                   href={url} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all"
                 >
-                  <span className="text-white text-sm bg-black bg-opacity-75 px-3 py-1 rounded">
+                  <span className="text-white opacity-0 group-hover:opacity-100 text-sm font-medium">
                     View Full Size
                   </span>
                 </a>
+                
                 {/* Image caption */}
-                <div className="mt-2 text-center text-xs text-gray-500">
+                <div className="mt-1 text-xs text-gray-500 text-center">
                   Image {index + 1} of {imageUrls.length}
                 </div>
               </div>
@@ -216,7 +218,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         {/* Additional text after images */}
         {text.includes('*And ') && (
-          <p className="text-sm text-gray-600 mt-3">
+          <p className="text-sm text-gray-600 italic">
             {text.match(/\*And .*?\*/)?.[0]?.replace(/\*/g, '')}
           </p>
         )}
@@ -244,6 +246,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     console.log('=== ChatMessage: Product Focused ===');
     console.log('Product ID:', productId);
     console.log('Product:', product?.title || 'Unknown');
+
     if (onFocusProduct) {
       onFocusProduct(productId);
     }
@@ -300,65 +303,69 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   };
 
   // Determine how many products to show in each slider
-  const exactToShow = hasExactMatches ?
+  const exactToShow = hasExactMatches ? 
     (showAllExact ? exactMatches : exactMatches.slice(0, 3)) : [];
-  const suggestionsToShow = hasSuggestions ?
+
+  const suggestionsToShow = hasSuggestions ? 
     (showAllSuggestions ? suggestions : suggestions.slice(0, 3)) : [];
+
+  // CRITICAL: Determine if we should show "Asking about" context
+  // Show it for user messages when there's a context product OR reply_to product
+  const shouldShowProductContext = !isBot && (message.reply_to?.product || selectedProductId);
+  const productForContext = message.reply_to?.product;
 
   // User message
   if (!isBot) {
     return (
       <div className={`flex justify-end mb-6 ${className}`}>
-        <div className="flex items-start space-x-3 max-w-2xl">
-          <div className="bg-blue-600 text-white rounded-2xl px-4 py-3 max-w-full">
-            {/* Quoted Product Context for User Message */}
-            {message.reply_to && message.reply_to.product && (
-              <div className="mb-2 p-2 bg-blue-500 bg-opacity-50 rounded-lg border-l-2 border-blue-300">
-                <div className="flex items-center gap-2">
-                  {/* Product Image */}
-                  {message.reply_to.product.images && message.reply_to.product.images.length > 0 ? (
-                    <img
-                      src={message.reply_to.product.images[0].src}
-                      alt={message.reply_to.product.images[0].alt || message.reply_to.product.title}
-                      className="w-8 h-8 object-cover rounded border border-blue-300 flex-shrink-0"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-blue-400 bg-opacity-50 rounded border border-blue-300 flex items-center justify-center flex-shrink-0">
-                      <ShoppingBag className="w-4 h-4 text-blue-200" />
+        <div className="max-w-3xl">
+          {/* ENHANCED: Product Context Display for User Messages */}
+          {shouldShowProductContext && productForContext && (
+            <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center space-x-3">
+                {/* Product Image */}
+                {productForContext.images && productForContext.images.length > 0 ? (
+                  <img
+                    src={productForContext.images[0].src}
+                    alt={productForContext.title}
+                    className="w-10 h-10 object-cover rounded-lg"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div className="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
+                    <ShoppingBag className="w-5 h-5 text-gray-400" />
+                  </div>
+                )}
+                
+                {/* Product Details */}
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">
+                    Asking about:
+                  </div>
+                  <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+                    {productForContext.title}
+                  </div>
+                  {productForContext.price && (
+                    <div className="text-xs text-gray-600 dark:text-gray-400">
+                      ${typeof productForContext.price === 'string' ? 
+                        productForContext.price : 
+                        productForContext.price.toFixed(2)
+                      }
                     </div>
                   )}
-                  
-                  {/* Product Details */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1 mb-1">
-                      <span className="text-xs text-blue-200">Asking about:</span>
-                    </div>
-                    <div className="text-xs text-blue-100 font-medium truncate">
-                      {message.reply_to.product.title}
-                    </div>
-                    {message.reply_to.product.price && (
-                      <div className="text-xs text-blue-200 font-semibold">
-                        ${typeof message.reply_to.product.price === 'string' ? 
-                           message.reply_to.product.price : 
-                           message.reply_to.product.price.toFixed(2)
-                        }
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
-            )}
-            
-            <p className="text-sm whitespace-pre-wrap break-words">{message.message}</p>
-            <div className="mt-1 text-xs text-blue-100 opacity-70">
-              {formatTimestamp(message.timestamp)}
             </div>
+          )}
+
+          <div className="bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-sm">
+            <div className="whitespace-pre-wrap">{message.message}</div>
           </div>
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <User className="w-5 h-5 text-white" />
+          
+          <div className="text-xs text-gray-500 mt-1 text-right">
+            {formatTimestamp(message.timestamp)}
           </div>
         </div>
       </div>
@@ -368,100 +375,97 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   // Bot message
   return (
     <div className={`flex justify-start mb-6 ${className}`}>
-      <div className="flex items-start space-x-3 max-w-full w-full">
+      <div className="flex space-x-3 max-w-4xl w-full">
         {/* Bot Avatar */}
-        <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 mt-1">
+        <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
           <Bot className="w-5 h-5 text-white" />
         </div>
 
         {/* Message Content */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 space-y-3">
+          
           {/* Reply Context - Only show product context for product-related messages */}
           {message.reply_to && (
-            <div className="bg-gray-50 dark:bg-gray-800 border-l-4 border-blue-500 rounded-r-lg px-3 py-2 mb-3 text-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <User className="w-3 h-3 text-gray-500" />
-                <span className="text-gray-500 text-xs">
-                  {message.reply_to.product && message.context_product ? 'Responding to your question about:' : formatReplyTimestamp(message.reply_to.timestamp)}
-                </span>
+            <div className="text-xs text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 dark:border-gray-600 pl-3">
+              <div className="font-medium mb-1">
+                {message.reply_to.product && message.context_product ? 'Responding to your question about:' : formatReplyTimestamp(message.reply_to.timestamp)}
               </div>
               
               {/* Enhanced Product Context Display - Only show if context_product exists */}
               {message.reply_to.product && message.context_product ? (
-                <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 mb-2">
-                  <div className="flex items-center gap-3">
-                    {/* Product Image */}
-                    {message.reply_to.product.images && message.reply_to.product.images.length > 0 ? (
-                      <img
-                        src={message.reply_to.product.images[0].src}
-                        alt={message.reply_to.product.images[0].alt || message.reply_to.product.title}
-                        className="w-12 h-12 object-cover rounded-lg border border-blue-200 dark:border-blue-700 flex-shrink-0"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <div className="w-12 h-12 bg-blue-100 dark:bg-blue-800 rounded-lg border border-blue-200 dark:border-blue-700 flex items-center justify-center flex-shrink-0">
-                        <ShoppingBag className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                      </div>
-                    )}
-                    
-                    {/* Product Details */}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-blue-800 dark:text-blue-200 truncate">
-                        {message.reply_to.product.title}
-                      </div>
+                <div className="flex items-center space-x-2 p-2 bg-gray-50 dark:bg-gray-800 rounded">
+                  {/* Product Image */}
+                  {message.reply_to.product.images && message.reply_to.product.images.length > 0 ? (
+                    <img
+                      src={message.reply_to.product.images[0].src}
+                      alt={message.reply_to.product.title}
+                      className="w-8 h-8 object-cover rounded"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                      <ShoppingBag className="w-4 h-4 text-gray-400" />
+                    </div>
+                  )}
+                  
+                  {/* Product Details */}
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 text-xs">
+                      {message.reply_to.product.title}
+                    </div>
+                    <div className="flex items-center space-x-2 text-xs text-gray-500">
                       {message.reply_to.product.price && (
-                        <div className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                          ${typeof message.reply_to.product.price === 'string' ? 
-                             message.reply_to.product.price : 
-                             message.reply_to.product.price.toFixed(2)
-                          }
-                        </div>
+                        <span>${typeof message.reply_to.product.price === 'string' ? 
+                          message.reply_to.product.price : 
+                          message.reply_to.product.price.toFixed(2)
+                        }</span>
                       )}
                       {message.reply_to.product.vendor && (
-                        <div className="text-xs text-blue-500 dark:text-blue-400">
-                          by {message.reply_to.product.vendor}
-                        </div>
+                        <span>by {message.reply_to.product.vendor}</span>
                       )}
                     </div>
                   </div>
                 </div>
               ) : (
                 /* Show just the user's question without product context for order/general queries */
-                <div className="text-gray-700 dark:text-gray-300 italic">
+                <div className="italic">
                   "{message.reply_to.message.length > 100 ? 
-                     `${message.reply_to.message.substring(0, 100)}...` : 
-                     message.reply_to.message}"
+                    `${message.reply_to.message.substring(0, 100)}...` : 
+                    message.reply_to.message}"
                 </div>
               )}
-              
+
               {/* User's question - Only show if there's product context, otherwise it's redundant */}
               {message.reply_to.product && message.context_product && (
-                <div className="text-gray-700 dark:text-gray-300 italic text-xs">
+                <div className="italic mt-1">
                   "{message.reply_to.message.length > 80 ? 
-                     `${message.reply_to.message.substring(0, 80)}...` : 
-                     message.reply_to.message}"
+                    `${message.reply_to.message.substring(0, 80)}...` : 
+                    message.reply_to.message}"
                 </div>
               )}
             </div>
           )}
-          
+
           {/* Text Response */}
           {message.message && (
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+              
               {/* ENHANCED: Message Text with Image Support */}
-              <div className="text-sm text-gray-700 dark:text-gray-200">
+              <div className="text-gray-900 dark:text-gray-100">
                 {renderMessageContent(message.message)}
               </div>
 
               {/* Timestamp and Context */}
-              <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
-                <span>{formatTimestamp(message.timestamp)}</span>
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                <div className="text-xs text-gray-500">
+                  {formatTimestamp(message.timestamp)}
+                </div>
                 {message.context_product && (
-                  <span className="text-blue-500">
+                  <div className="text-xs text-blue-600 dark:text-blue-400">
                     Context: {message.context_product.title?.substring(0, 20)}...
-                  </span>
+                  </div>
                 )}
               </div>
             </div>
@@ -469,19 +473,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
           {/* Applied Filters Display */}
           {hasAppliedFilters && (
-            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-              <div className="flex items-center gap-2 mb-2">
-                <Filter className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Filters applied:</span>
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-lg p-3">
+              <div className="flex items-center space-x-2 text-sm text-amber-800 dark:text-amber-200">
+                <Filter className="w-4 h-4" />
+                <span className="font-medium">Filters applied:</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {message.applied_filters!.price_max && (
-                  <span className="px-2 py-1 bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-xs">
+                  <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 rounded text-xs">
                     Under ${message.applied_filters!.price_max}
                   </span>
                 )}
                 {message.applied_filters!.brand && (
-                  <span className="px-2 py-1 bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-xs">
+                  <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 rounded text-xs">
                     {message.applied_filters!.brand}
                   </span>
                 )}
@@ -491,10 +495,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
           {/* Exact Matches Slider */}
           {hasExactMatches && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                  <ShoppingBag className="w-5 h-5 text-blue-600" />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                  <Package className="w-5 h-5 mr-2 text-blue-600" />
                   {exactMatches.length === 1 ? 'Perfect Match' : `${message.total_exact_matches || exactMatches.length} Exact Matches`}
                 </h3>
                 {exactMatches.length > 3 && (
@@ -502,15 +506,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     onClick={() => setShowAllExact(!showAllExact)}
                     className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center"
                   >
-                    <ChevronRight className={`w-4 h-4 transform transition-transform ${showAllExact ? 'rotate-90' : ''}`} />
+                    <ChevronRight className="w-4 h-4 mr-1" />
                     {showAllExact ? 'Show Less' : `Show All ${exactMatches.length}`}
                   </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {exactToShow.map((product, index) => (
-                  <div key={product.shopify_id || index} className="relative">
+                  <div key={product.id || index} className="relative">
                     {/* Product Number Badge */}
                     <button
                       onClick={() => handleProductNumberClick(index + 1)}
@@ -522,8 +526,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
                     {/* Quick Actions Dropdown */}
                     {activeProductNumber === index + 1 && (
-                      <div className="absolute top-6 left-0 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-36">
-                        <div className="text-xs font-medium text-gray-700 mb-1">Quick questions:</div>
+                      <div className="absolute top-6 left-0 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 min-w-40">
+                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Quick questions:</div>
                         {['What colors?', 'What sizes?', 'Show me images', 'Price?', 'Similar products?'].map((question) => (
                           <button
                             key={question}
@@ -552,38 +556,36 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 <div className="text-center space-y-2">
                   <button
                     onClick={handleShowMoreExact}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    {!showAllExact && exactMatches.length > 3 
+                    {!showAllExact && exactMatches.length > 3
                       ? `See ${exactMatches.length - 3} more matches`
-                      : message.has_more_exact 
+                      : message.has_more_exact
                       ? `Load more products (${(message.total_exact_matches || 0) - exactMatches.length} remaining)`
                       : 'See more matches'
                     }
                   </button>
-                  
+
                   {/* Show "Show All" option if total is reasonable (≤50) */}
                   {message.has_more_exact && (message.total_exact_matches || 0) <= 50 && (message.total_exact_matches || 0) > exactMatches.length && (
-                    <div className="text-xs text-gray-600 dark:text-gray-400">
-                      <button
-                        onClick={() => {
-                          console.log('Show all products requested');
-                          if (onRequestMore) {
-                            // Request all remaining pages at once
-                            onRequestMore('exact');
-                          }
-                        }}
-                        className="text-blue-600 hover:text-blue-800 underline"
-                      >
-                        or show all {message.total_exact_matches} at once
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        console.log('Show all products requested');
+                        if (onRequestMore) {
+                          // Request all remaining pages at once
+                          onRequestMore('exact');
+                        }
+                      }}
+                      className="text-blue-600 hover:text-blue-800 underline"
+                    >
+                      or show all {message.total_exact_matches} at once
+                    </button>
                   )}
                 </div>
               ) : null}
 
               {!showAllExact && exactMatches.length > 3 && (
-                <div className="text-center text-xs text-gray-500 mt-2">
+                <div className="text-xs text-gray-500 text-center">
                   Showing 3 of {exactMatches.length} matches
                 </div>
               )}
@@ -592,10 +594,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
           {/* Suggestions Slider */}
           {hasSuggestions && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                  <Heart className="w-5 h-5 text-pink-600" />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                  <Lightbulb className="w-5 h-5 mr-2 text-amber-600" />
                   You Might Also Like
                 </h3>
                 {suggestions.length > 3 && (
@@ -603,16 +605,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     onClick={() => setShowAllSuggestions(!showAllSuggestions)}
                     className="text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center"
                   >
-                    <ChevronRight className={`w-4 h-4 transform transition-transform ${showAllSuggestions ? 'rotate-90' : ''}`} />
+                    <ChevronRight className="w-4 h-4 mr-1" />
                     {showAllSuggestions ? 'Show Less' : `Show All ${suggestions.length}`}
                   </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {suggestionsToShow.map((product, index) => (
                   <ProductCard
-                    key={product.shopify_id || index}
+                    key={product.id || index}
                     product={product}
                     isSelected={selectedProductId === product.shopify_id}
                     onClick={() => handleProductFocus(product.shopify_id, product)}
@@ -628,7 +630,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 <div className="text-center">
                   <button
                     onClick={handleShowMoreSuggestions}
-                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors text-sm"
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
                   >
                     {!showAllSuggestions && suggestions.length > 3
                       ? `See ${suggestions.length - 3} more suggestions`
@@ -639,7 +641,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               ) : null}
 
               {!showAllSuggestions && suggestions.length > 3 && (
-                <div className="text-center text-xs text-gray-500 mt-2">
+                <div className="text-xs text-gray-500 text-center">
                   Showing 3 of {suggestions.length} suggestions
                 </div>
               )}
@@ -648,11 +650,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
           {/* Orders */}
           {hasOrders && (
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <Package className="w-5 h-5 text-green-600" />
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                <Package className="w-5 h-5 mr-2 text-green-600" />
                 Order Information
               </h3>
+              
               {message.orders!.map((order, index) => (
                 <OrderCard key={order.id || index} order={order} />
               ))}
@@ -661,11 +664,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
           {/* ENHANCED: Suggested Questions with better context handling */}
           {hasSuggestedQuestions && (
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3 flex items-center gap-2">
-                <Lightbulb className="w-4 h-4" />
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center">
+                <MessageSquare className="w-4 h-4 mr-2" />
                 You might also ask:
               </h4>
+              
               <div className="flex flex-wrap gap-2">
                 {message.suggested_questions!.map((question, index) => (
                   <button
@@ -674,9 +678,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                       console.log('Suggestion button clicked:', question);
                       handleSuggestedClick(question);
                     }}
-                    className="inline-flex items-center px-3 py-2 bg-white border border-amber-300
-                             rounded-full text-sm text-amber-800 hover:bg-amber-50
-                             hover:border-amber-400 transition-colors duration-200 shadow-sm
+                    className="inline-flex items-center px-3 py-2 bg-white border border-amber-300 
+                             rounded-full text-sm text-amber-800 hover:bg-amber-50 
+                             hover:border-amber-400 transition-colors duration-200 shadow-sm 
                              cursor-pointer active:bg-amber-100"
                     title={`Ask: ${question}`}
                   >
@@ -687,8 +691,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
               {/* Debug info for context product */}
               {process.env.NODE_ENV === 'development' && (
-                <div className="mt-2 p-2 bg-gray-100 rounded text-xs">
-                  <strong>Debug Context Info:</strong>
+                <div className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 p-2 rounded mt-2">
+                  <div>Debug Context Info:</div>
                   <div>Message Context: {message.context_product?.title || 'None'}</div>
                   <div>Selected ID: {selectedProductId || 'None'}</div>
                   <div>Exact Matches: {exactMatches.length}</div>

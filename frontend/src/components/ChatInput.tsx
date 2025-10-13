@@ -9,12 +9,12 @@ interface ChatInputProps {
   onClearQuote?: () => void;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ 
-  onSendMessage, 
-  isLoading, 
-  fullScreen = false, 
+const ChatInput: React.FC<ChatInputProps> = ({
+  onSendMessage,
+  isLoading,
+  fullScreen = false,
   quotedProduct,
-  onClearQuote 
+  onClearQuote
 }) => {
   const [message, setMessage] = useState('');
 
@@ -42,18 +42,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
     : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg p-3 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ml-2";
 
   return (
-    <div className="w-full">
-      {/* Quoted Product Display */}
+    <div className={`bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 ${fullScreen ? 'p-6' : 'p-4'}`}>
+      {/* Quoted Product Display - ENHANCED WITH PERSISTENCE INDICATOR */}
       {quotedProduct && (
-        <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded-r-lg">
+        <div className="mb-4 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center space-x-3">
               {/* Product Image */}
               {quotedProduct.images && quotedProduct.images.length > 0 ? (
                 <img
                   src={quotedProduct.images[0].src}
-                  alt={quotedProduct.images[0].alt || quotedProduct.title}
-                  className="w-12 h-12 object-cover rounded-lg border border-blue-200 dark:border-blue-700 flex-shrink-0"
+                  alt={quotedProduct.title}
+                  className="w-12 h-12 object-cover rounded-lg"
                   onError={(e) => {
                     // Fallback to icon if image fails to load
                     e.currentTarget.style.display = 'none';
@@ -65,62 +65,71 @@ const ChatInput: React.FC<ChatInputProps> = ({
               
               {/* Fallback Icon */}
               <div 
-                className="w-12 h-12 bg-blue-100 dark:bg-blue-800 rounded-lg border border-blue-200 dark:border-blue-700 flex items-center justify-center flex-shrink-0"
+                className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center" 
                 style={{ display: quotedProduct.images && quotedProduct.images.length > 0 ? 'none' : 'flex' }}
               >
-                <ShoppingBag className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <ShoppingBag className="w-6 h-6 text-gray-400" />
               </div>
               
               {/* Product Details */}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                  Asking about product:
+              <div className="flex-1">
+                <div className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">
+                  Currently discussing:
                 </div>
-                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium truncate">
+                <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
                   {quotedProduct.title}
                 </div>
-                {quotedProduct.price && (
-                  <div className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    ${typeof quotedProduct.price === 'string' ? quotedProduct.price : quotedProduct.price.toFixed(2)}
-                  </div>
-                )}
-                {quotedProduct.vendor && (
-                  <div className="text-xs text-blue-500 dark:text-blue-400">
-                    by {quotedProduct.vendor}
-                  </div>
-                )}
+                <div className="flex items-center space-x-3 text-xs text-gray-600 dark:text-gray-400">
+                  {quotedProduct.price && (
+                    <span className="font-medium">
+                      ${typeof quotedProduct.price === 'string' ? quotedProduct.price : quotedProduct.price.toFixed(2)}
+                    </span>
+                  )}
+                  {quotedProduct.vendor && (
+                    <span>by {quotedProduct.vendor}</span>
+                  )}
+                </div>
               </div>
             </div>
+            
+            {/* Clear Context Button */}
             {onClearQuote && (
               <button
                 onClick={onClearQuote}
-                className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 dark:hover:bg-blue-800 rounded flex-shrink-0"
-                title="Clear quoted product"
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                title="Stop discussing this product"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
+          
+          {/* Context Persistence Indicator */}
+          <div className="mt-2 text-xs text-blue-600 dark:text-blue-300 flex items-center">
+            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+            All follow-up questions will be about this product until you change or clear the selection
+          </div>
         </div>
       )}
-      
+
       {/* Input Form */}
-      <form onSubmit={handleSubmit} className="flex items-end">
+      <form onSubmit={handleSubmit} className="flex items-end space-x-2">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleKeyPress}
           placeholder={
-            quotedProduct 
-              ? `Ask about ${quotedProduct.title}...` 
-              : fullScreen 
-                ? "Type your message here... (Press Enter to send)" 
-                : "Type your message..."
+            quotedProduct
+              ? `Ask about ${quotedProduct.title}...`
+              : fullScreen
+              ? "Type your message here... (Press Enter to send)"
+              : "Type your message..."
           }
           className={inputClasses}
           rows={fullScreen ? 2 : 1}
           disabled={isLoading}
         />
+        
         <button
           type="submit"
           disabled={!message.trim() || isLoading}
