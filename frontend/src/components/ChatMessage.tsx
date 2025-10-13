@@ -1,4 +1,4 @@
-// Fixed ChatMessage Component - Original Layout with Right/Left Alignment
+// Enhanced ChatMessage.tsx - Complete File with All Current Functionality + Fixes for Issues #6
 // File: frontend/src/components/ChatMessage.tsx
 
 import React, { useState } from 'react';
@@ -273,7 +273,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const suggestionsToShow = hasSuggestions ?
     (showAllSuggestions ? suggestions : suggestions.slice(0, 3)) : [];
 
-  // ENHANCED: ALWAYS show "Asking about" context for user messages when there's a context product
+  // CRITICAL FIX for Issue #6: ALWAYS show "Asking about" context for user messages when there's a context product
   const shouldShowProductContext = !isBot && message.reply_to?.product;
   const productForContext = message.reply_to?.product;
 
@@ -284,7 +284,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     return (
       <div className={`flex items-start space-x-3 justify-end ${className}`}>
         <div className="flex-1 space-y-2 max-w-xs md:max-w-md">
-          {/* ENHANCED: ALWAYS show Product Context Display for User Messages when context exists */}
+          {/* CRITICAL FIX for Issue #6: ALWAYS show Product Context Display for User Messages when context exists */}
           {shouldShowProductContext && productForContext && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2">
               <div className="flex items-center space-x-3">
@@ -352,14 +352,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
       {/* Message Content */}
       <div className="flex-1 space-y-3">
-        {/* ENHANCED: Reply Context - ALWAYS show product context for product-related messages */}
+        {/* CRITICAL FIX for Issue #6: Reply Context - ALWAYS show product context for product-related messages */}
         {message.reply_to && (
           <div className="bg-gray-50 border-l-4 border-gray-300 pl-4 py-2">
             <p className="text-xs text-gray-600 mb-2">
               {message.reply_to.product && message.context_product ? 'Responding to your question about:' : formatReplyTimestamp(message.reply_to.timestamp)}
             </p>
 
-            {/* ENHANCED: ALWAYS show Product Context when available */}
+            {/* CRITICAL FIX for Issue #6: ALWAYS show Product Context when available */}
             {message.reply_to.product && message.context_product ? (
               <div className="flex items-center space-x-3 bg-white rounded-lg p-2 border">
                 {/* Product Image */}
@@ -448,6 +448,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               {message.applied_filters!.max && (
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
                   Under ${message.applied_filters!.max}
+                </span>
+              )}
+              {message.applied_filters!.price_filter?.max && (
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
+                  Under ${message.applied_filters!.price_filter.max}
+                </span>
+              )}
+              {message.applied_filters!.brand_filter && (
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
+                  {message.applied_filters!.brand_filter}
                 </span>
               )}
               {message.applied_filters!.brand && (
@@ -607,7 +617,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           </div>
         )}
 
-        {/* ENHANCED: Contextual Suggested Questions */}
+        {/* ENHANCED for Issue #4: Contextual Suggested Questions */}
         {hasSuggestedQuestions && (
           <div className="space-y-3">
             <h4 className="text-sm font-medium text-gray-700 flex items-center gap-2">
@@ -642,7 +652,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 Selected ID: {selectedProductId || 'None'}<br />
                 Exact Matches: {exactMatches.length}<br />
                 Suggestions: {suggestions.length}<br />
-                Contains Images: {containsProductImages(message.message) ? 'Yes' : 'No'}
+                Contains Images: {containsProductImages(message.message) ? 'Yes' : 'No'}<br />
+                Reply To Product: {message.reply_to?.product?.title || 'None'}<br />
+                Should Show Context: {shouldShowProductContext ? 'Yes' : 'No'}
               </div>
             )}
           </div>

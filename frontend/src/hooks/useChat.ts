@@ -1,5 +1,5 @@
-// Enhanced Frontend Chat Hook - Comprehensive Fixes for All 7 Issues
-// File: frontend/src/hooks/useChat.ts
+// # Enhanced useChat.ts - Fixed All Frontend Issues
+// # File: frontend/src/hooks/useChat.ts
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { ChatMessage, ChatResponse, IntentType } from '@/types';
@@ -56,14 +56,13 @@ export const useChat = () => {
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryItem[]>([]);
   const [quotedProduct, setQuotedProduct] = useState<any>(null);
   const [lastSearchResults, setLastSearchResults] = useState<any[]>([]);
-  const [lastSearchQuery, setLastSearchQuery] = useState(() => {
+  const [lastSearchQuery, setLastSearchQuery] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('lastSearchQuery') || '';
     }
     return '';
   });
-
-  const [currentPage, setCurrentPage] = useState(() => {
+  const [currentPage, setCurrentPage] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       return parseInt(localStorage.getItem('currentPage') || '1', 10);
     }
@@ -81,7 +80,7 @@ export const useChat = () => {
     return id;
   }, []);
 
-  // ENHANCED: More conservative context change detection
+  // ENHANCED: More conservative context change detection for Issue #1
   const detectContextChange = useCallback((message: string, currentContext?: any) => {
     console.log('🔍 FRONTEND: Detecting context change');
     console.log('Message:', message);
@@ -95,16 +94,19 @@ export const useChat = () => {
       /\b(?:looking\s+for|want|need)\s+(?:some\s+)?(?:a\s+)?[a-zA-Z\s]+\s*(?:dress|shirt|jacket|shoes|bag)/i,
       /\bi\s*(?:want|need|am\s+looking\s+for)\s+[a-zA-Z\s]+/i,
       /\b(?:red|blue|green|black|white|pink|yellow|purple)\s+(?:dress|shirt|jacket|pants|shoes)/i,
-      /\bunder\s*\$?\d+/i,
-      /\bbelow\s*\$?\d+/i,
-      /\bproducts?\s+under\s+\$?\d+/i,
-      /\bitems?\s+under\s+\$?\d+/i,
-      /\bbudget\s+of\s+\$?\d+/i,
-      /\bmax\s+\$?\d+/i,
-      /\bmaximum\s+\$?\d+/i,
+      // ENHANCED: Price-based patterns for Issue #7
+      /\bunder\s*[$₹]?\d+/i,
+      /\bbelow\s*[$₹]?\d+/i,
+      /\bproducts?\s+under\s+[$₹]?\d+/i,
+      /\bitems?\s+under\s+[$₹]?\d+/i,
+      /\bbudget\s+of\s+[$₹]?\d+/i,
+      /\bmax\s+[$₹]?\d+/i,
+      /\bmaximum\s+[$₹]?\d+/i,
+      /\bprice\s+under\s+[$₹]?\d+/i,
+      /\bcost\s+under\s+[$₹]?\d+/i,
     ];
 
-    // Order/General inquiry patterns (should clear context)  
+    // Order/General inquiry patterns (should clear context)
     const nonProductPatterns = [
       /\b(?:order|orders?)\s+(?:status|number|details?|tracking)/i,
       /\b(?:track|tracking)\s+(?:my\s+)?order/i,
@@ -115,7 +117,7 @@ export const useChat = () => {
       /\bthanks?\s+(?:you\s+)?/i,
     ];
 
-    // Product-specific question patterns (should maintain context)
+    // Product-specific question patterns (should maintain context) - ENHANCED for Issue #1
     const productQuestionPatterns = [
       /\b(?:what|which)\s+(?:colors?|sizes?|materials?)\s+(?:are\s+)?available/i,
       /\b(?:how\s+much|what.s\s+the\s+price|cost)/i,
@@ -126,6 +128,9 @@ export const useChat = () => {
       /\bwhat\s+(?:sizes?|colors?|options?)\s+(?:does\s+(?:this|it)\s+come\s+in|are\s+there)/i,
       /\b(?:similar|more\s+like\s+this)\s+products?/i,
       /\bis\s+there\s+(?:a\s+)?discount/i,
+      // NEW: Direct question words that imply context continuation
+      /^\s*(?:what|which|how|is|are|does|can)\s+/i,
+      /\b(?:about\s+)?(?:this|it)\b/i,
     ];
 
     // Check patterns
@@ -171,7 +176,7 @@ export const useChat = () => {
     });
   }, []);
 
-  // ENHANCED: Context persistence with localStorage
+  // ENHANCED: Context persistence with localStorage for Issue #6
   useEffect(() => {
     if (typeof window !== 'undefined') {
       if (contextProduct) {
@@ -210,15 +215,14 @@ export const useChat = () => {
   // Load chat history
   const loadChatHistory = useCallback(async (email?: string) => {
     if (!email) return;
-    
+
     try {
       console.log('📚 Loading chat history for email:', email);
       const response = await fetch(`/api/v1/chat/history?email=${encodeURIComponent(email)}&session_id=${sessionId}`);
-      
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Loaded chat history:', data);
-        
+
         if (data.messages && data.messages.length > 0) {
           const transformedMessages: ChatMessage[] = data.messages.map((m: any, index: number) => ({
             id: `history-${index}`,
@@ -243,7 +247,7 @@ export const useChat = () => {
           }));
           setConversationHistory(convHistory);
 
-          // ENHANCED: Restore context from last message if available
+          // ENHANCED: Restore context from last message if available for Issue #6
           const lastBotMessage = data.messages
             .filter((m: any) => m.role === 'assistant')
             .pop();
@@ -260,7 +264,7 @@ export const useChat = () => {
     }
   }, [sessionId]);
 
-  // ENHANCED: Intelligent message sending with context management
+  // ENHANCED: Intelligent message sending with context management for Issue #1 & #6
   const sendMessage = useCallback(async (
     message: string,
     email?: string,
@@ -273,7 +277,7 @@ export const useChat = () => {
     const trimmedMessage = message.trim();
     console.log('💬 SENDING MESSAGE:', trimmedMessage);
 
-    // ENHANCED: More conservative context change detection
+    // ENHANCED: More conservative context change detection for Issue #1
     const contextAnalysis = detectContextChange(trimmedMessage, contextProduct);
 
     // Only clear context if we're very confident it should be cleared
@@ -288,7 +292,7 @@ export const useChat = () => {
       message: trimmedMessage,
       sender: 'user',
       timestamp: new Date(),
-      // ENHANCED: Always include reply_to context when context exists
+      // ENHANCED: Always include reply_to context when context exists for Issue #6
       reply_to: (selectedProductId && contextProduct && !contextAnalysis.shouldClearContext) ? {
         message: trimmedMessage,
         timestamp: new Date(),
@@ -342,7 +346,8 @@ export const useChat = () => {
         has_more_suggestions: response.has_more_suggestions,
         applied_filters: response.applied_filters,
         search_metadata: response.search_metadata,
-        // ENHANCED: Always show reply context for bot messages when context exists
+        
+        // ENHANCED: Always show reply context for bot messages when context exists for Issue #6
         reply_to: {
           message: userMessage.message,
           timestamp: userMessage.timestamp,
@@ -352,7 +357,7 @@ export const useChat = () => {
 
       setMessages(prev => [...prev, botMessage]);
 
-      // ENHANCED: Update context based on backend response
+      // ENHANCED: Update context based on backend response for Issue #1 & #6
       if (response.context_product && response.intent !== 'ORDER_INQUIRY' && response.intent !== 'GENERAL_CHAT') {
         console.log('🎯 Updating context from backend response:', response.context_product.title);
         setContextProduct(response.context_product);
@@ -396,13 +401,14 @@ export const useChat = () => {
         sender: 'bot',
         timestamp: new Date(),
       };
+
       setMessages(prev => [...prev, errorChatMessage]);
     } finally {
       setIsLoading(false);
     }
   }, [sessionId, selectedProductId, conversationHistory, contextProduct, quotedProduct, detectContextChange, clearProductContext, sanitizeBotText]);
 
-  // ENHANCED: Send suggested question with context preservation
+  // ENHANCED: Send suggested question with context preservation for Issue #4
   const sendSuggestedQuestion = useCallback(async (question: string, messageContextProduct?: any) => {
     console.log('💡 SENDING SUGGESTED QUESTION');
     console.log('Question:', question);
@@ -422,7 +428,7 @@ export const useChat = () => {
     await sendMessage(question, email || undefined);
   }, [sendMessage, contextProduct]);
 
-  // Select product with context setting
+  // Select product with context setting for Issue #5 & #6
   const selectProduct = useCallback((productId: string, product?: any) => {
     console.log('🎯 SELECTING PRODUCT');
     console.log('Product ID:', productId);
@@ -449,7 +455,7 @@ export const useChat = () => {
     }
   }, [messages]);
 
-  // Quote product for "Reply to this product"
+  // Quote product for "Reply to this product" - Issue #5
   const quoteProduct = useCallback((product: any) => {
     console.log('💬 QUOTING PRODUCT FOR REPLY');
     console.log('Product:', product.title);
@@ -503,6 +509,7 @@ export const useChat = () => {
         ...(message.exact_matches || []),
         ...(message.suggestions || []),
       ];
+
       if (allProducts[productNumber - 1]) {
         targetProduct = allProducts[productNumber - 1];
         break;
@@ -566,7 +573,7 @@ export const useChat = () => {
             'Find me black sneakers under $100',
             'What\'s on sale today?',
             'Check my order status'
-          ]
+          ],
         };
         setMessages([welcomeMessage]);
       }
@@ -601,7 +608,7 @@ export const useChat = () => {
     askAboutProduct,
     loadChatHistory,
 
-    // Product context management
+    // Product context management - Issue #6
     quotedProduct,
     quoteProduct,
     clearQuotedProduct,

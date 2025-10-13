@@ -1,5 +1,5 @@
-// Fixed ProductCard Component - Reply Button Restored + Functional Buy & View Buttons
-// File: frontend/src/components/ProductCard.tsx
+// # Enhanced ProductCard.tsx - Fixed Buy & View Button Functionality
+// # File: frontend/src/components/ProductCard.tsx
 
 import React from 'react';
 import { Star, ShoppingCart, Eye, Tag, Zap, MessageSquare, ExternalLink } from 'lucide-react';
@@ -56,15 +56,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
     return Math.round(((originalPrice - currentPrice) / originalPrice) * 100);
   };
 
-  const hasDiscount = product.compare_at_price && 
+  const hasDiscount = product.compare_at_price &&
     parseFloat(product.compare_at_price.toString()) > parseFloat(product.price.toString());
-    
-  const discountPercent = hasDiscount ? 
+
+  const discountPercent = hasDiscount ?
     calculateDiscount(product.price, product.compare_at_price!) : 0;
-    
+
   const isOutOfStock = product.inventory_quantity === 0;
 
-  // ENHANCED: Generate proper product URLs
+  // ENHANCED: Generate proper product URLs for Issue #5
   const generateProductUrl = (handle?: string, shopifyId?: string) => {
     if (handle) {
       return `/products/${handle}`;
@@ -75,15 +75,16 @@ const ProductCard: React.FC<ProductCardProps> = ({
   };
 
   const generateBuyUrl = (handle?: string, shopifyId?: string) => {
+    // ENHANCED: Better buy URL generation
     if (handle) {
-      return `/cart/add?id=${handle}&quantity=1`;
+      return `/cart/add?variant=${handle}&quantity=1`;
     } else if (shopifyId) {
       return `/cart/add?id=${shopifyId}&quantity=1`;
     }
     return '#';
   };
 
-  // ENHANCED: Handle Buy button click
+  // ENHANCED: Handle Buy button click with better functionality for Issue #5
   const handleBuyClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -95,35 +96,77 @@ const ProductCard: React.FC<ProductCardProps> = ({
     const buyUrl = generateBuyUrl(product.handle, product.shopify_id);
     
     if (buyUrl === '#') {
-      handleViewClick(e);
+      // Fallback: show product info and suggest visiting the store
+      const productInfo = `
+Product: ${product.title}
+Price: ${formatPrice(product.price)}
+${product.vendor ? `Vendor: ${product.vendor}` : ''}
+
+To purchase this item, please visit our store or contact customer service.
+${product.handle ? `Product Handle: ${product.handle}` : ''}
+${product.shopify_id ? `Product ID: ${product.shopify_id}` : ''}
+      `.trim();
+      
+      if (confirm(`${productInfo}\n\nWould you like to view the product page instead?`)) {
+        handleViewClick(e);
+      }
       return;
     }
 
-    // Navigate to buy URL
-    window.location.href = buyUrl;
+    // ENHANCED: Navigate to buy URL with better error handling
+    try {
+      window.location.href = buyUrl;
+    } catch (error) {
+      console.error('Failed to navigate to buy URL:', error);
+      // Fallback to view product
+      handleViewClick(e);
+    }
   };
 
-  // ENHANCED: Handle View button click
+  // ENHANCED: Handle View button click with improved functionality for Issue #5
   const handleViewClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     
     const productUrl = generateProductUrl(product.handle, product.shopify_id);
     
     if (productUrl === '#') {
+      // Enhanced fallback with more detailed product information
       const productInfo = `
-Product: ${product.title}
-Price: ${formatPrice(product.price)}
-${product.vendor ? `Vendor: ${product.vendor}` : ''}
-${product.description ? `Description: ${product.description.replace(/<[^>]*>/g, '').substring(0, 100)}...` : ''}
-${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
+🛍️ ${product.title}
+
+💰 Price: ${formatPrice(product.price)}
+${hasDiscount ? `💸 Original: ${formatPrice(product.compare_at_price!)} (Save ${discountPercent}%)` : ''}
+${product.vendor ? `🏪 Brand: ${product.vendor}` : ''}
+${product.product_type ? `📂 Category: ${product.product_type}` : ''}
+${product.description ? `📝 Description: ${product.description.replace(/<[^>]*>/g, '').substring(0, 150)}...` : ''}
+${product.inventory_quantity !== undefined ? `📦 Stock: ${product.inventory_quantity > 0 ? `${product.inventory_quantity} available` : 'Out of stock'}` : ''}
+${product.variants_count && product.variants_count > 1 ? `🎨 ${product.variants_count} variants available` : ''}
+
+Product Information:
+${product.handle ? `Handle: ${product.handle}` : ''}
+${product.shopify_id ? `ID: ${product.shopify_id}` : ''}
       `.trim();
       
       alert(productInfo);
       return;
     }
 
-    // Open product page in new tab
-    window.open(productUrl, '_blank');
+    // ENHANCED: Open product page with better error handling
+    try {
+      window.open(productUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Failed to open product URL:', error);
+      // Fallback: copy URL to clipboard
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(window.location.origin + productUrl).then(() => {
+          alert('Product URL copied to clipboard!');
+        }).catch(() => {
+          alert(`Product URL: ${window.location.origin + productUrl}`);
+        });
+      } else {
+        alert(`Product URL: ${window.location.origin + productUrl}`);
+      }
+    }
   };
 
   // Variant-specific styling
@@ -133,14 +176,14 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
         return {
           cardClass: 'bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border-amber-200 dark:border-amber-900',
           badgeClass: 'bg-amber-500 text-white',
-          badgeIcon: <Zap className="w-3 h-3" />,
+          badgeIcon: <Zap size={12} />,
           badgeText: 'Suggested'
         };
       case 'featured':
         return {
           cardClass: 'bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-900',
           badgeClass: 'bg-blue-500 text-white',
-          badgeIcon: <Star className="w-3 h-3" />,
+          badgeIcon: <Star size={12} />,
           badgeText: 'Featured'
         };
       default:
@@ -156,13 +199,18 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
   const styles = getVariantStyles();
 
   return (
-    <div 
-      className={`relative rounded-lg border shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden ${styles.cardClass} ${isSelected ? 'ring-2 ring-blue-500' : ''} ${className}`}
+    <div
+      className={`
+        ${styles.cardClass}
+        relative border rounded-lg shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer
+        ${isSelected ? 'ring-2 ring-blue-500 shadow-lg' : 'hover:border-gray-300 dark:hover:border-gray-600'}
+        ${className}
+      `}
       onClick={onClick}
     >
       {/* Variant Badge */}
       {variant !== 'default' && (
-        <div className={`absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full ${styles.badgeClass}`}>
+        <div className={`absolute top-2 left-2 z-10 ${styles.badgeClass} px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1`}>
           {styles.badgeIcon}
           {styles.badgeText}
         </div>
@@ -170,14 +218,14 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
 
       {/* Discount Badge */}
       {hasDiscount && (
-        <div className="absolute top-2 right-2 z-10 bg-red-500 text-white px-2 py-1 text-xs font-bold rounded">
+        <div className="absolute top-2 right-2 z-10 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-bold">
           -{discountPercent}%
         </div>
       )}
 
       {/* Out of Stock Overlay */}
       {isOutOfStock && (
-        <div className="absolute inset-0 bg-gray-900/50 flex items-center justify-center z-20">
+        <div className="absolute inset-0 bg-gray-900/50 rounded-lg flex items-center justify-center z-20">
           <span className="bg-gray-800 text-white px-4 py-2 rounded-lg font-semibold">
             Out of Stock
           </span>
@@ -185,13 +233,15 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
       )}
 
       {/* Product Image */}
-      <div className="aspect-w-1 aspect-h-1 w-full">
+      <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 rounded-t-lg overflow-hidden">
         {product.images && product.images.length > 0 ? (
-          <img 
-            src={product.images[0].src} 
+          <img
+            src={product.images[0].src}
             alt={product.images[0].alt || product.title}
-            className="w-full h-48 object-cover"
+            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+            loading="lazy"
             onLoad={() => {
+              // Trigger any image loaded events
               setTimeout(() => {
                 const event = new CustomEvent('imageLoaded');
                 window.dispatchEvent(event);
@@ -199,77 +249,77 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
             }}
           />
         ) : (
-          <div className="w-full h-48 bg-gray-200 flex items-center justify-center">
-            <Tag className="w-12 h-12 text-gray-400" />
+          <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600">
+            <ShoppingCart size={48} />
           </div>
         )}
-      </div>
 
-      {/* RESTORED: Quick Action Buttons */}
-      <div className="absolute top-12 right-2 z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity">
-        {/* RESTORED: Reply Button - First Priority */}
-        {onReply && (
+        {/* ENHANCED: Quick Action Buttons - Positioned for better UX */}
+        <div className="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          {/* PRIORITY: Reply Button - Always visible for Issue #5 */}
+          {onReply && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReply(product);
+              }}
+              className="p-2 bg-green-500/90 hover:bg-green-600 text-white rounded-full shadow-sm transition-colors"
+              title="Reply to this product"
+            >
+              <MessageSquare size={16} />
+            </button>
+          )}
+
+          {/* View Button */}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onReply(product);
-            }}
-            className="p-2 bg-green-500/90 hover:bg-green-600 text-white rounded-full shadow-sm transition-colors"
-            title="Reply to this product"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-        )}
-
-        {/* View Button */}
-        <button
-          onClick={handleViewClick}
-          className="p-2 bg-gray-500/90 hover:bg-gray-600 text-white rounded-full shadow-sm transition-colors"
-          title="View product details"
-        >
-          <Eye className="w-4 h-4" />
-        </button>
-
-        {/* Buy Button */}
-        {!isOutOfStock && (
-          <button
-            onClick={handleBuyClick}
+            onClick={handleViewClick}
             className="p-2 bg-blue-500/90 hover:bg-blue-600 text-white rounded-full shadow-sm transition-colors"
-            title="Add to cart"
+            title="View product details"
           >
-            <ShoppingCart className="w-4 h-4" />
+            <Eye size={16} />
           </button>
-        )}
+
+          {/* Buy Button - ENHANCED functionality */}
+          {!isOutOfStock && (
+            <button
+              onClick={handleBuyClick}
+              className="p-2 bg-purple-500/90 hover:bg-purple-600 text-white rounded-full shadow-sm transition-colors"
+              title="Add to cart"
+            >
+              <ShoppingCart size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Product Info */}
-      <div className="p-4 group">
+      <div className="p-4 space-y-2">
         {/* Vendor */}
         {product.vendor && (
-          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">
+          <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">
             {product.vendor}
           </p>
         )}
 
         {/* Title */}
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 line-clamp-2">
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 leading-5">
           {product.title}
         </h3>
 
         {/* Description - only show in non-compact mode */}
         {!showCompact && product.description && (
-          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
+          <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
             {product.description.replace(/<[^>]*>/g, '').substring(0, 100)}...
           </p>
         )}
 
         {/* Price */}
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
             {formatPrice(product.price)}
           </span>
           {hasDiscount && (
-            <span className="text-sm text-gray-500 line-through">
+            <span className="text-sm text-gray-500 dark:text-gray-400 line-through">
               {formatPrice(product.compare_at_price!)}
             </span>
           )}
@@ -277,14 +327,14 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
 
         {/* Stock Status */}
         {product.inventory_quantity !== undefined && (
-          <p className={`text-xs mb-2 ${isOutOfStock ? 'text-red-600' : 'text-green-600'}`}>
+          <p className={`text-xs ${isOutOfStock ? 'text-red-500' : 'text-green-600 dark:text-green-400'}`}>
             {isOutOfStock ? 'Out of stock' : `${product.inventory_quantity} left`}
           </p>
         )}
 
-        {/* ENHANCED: Action Buttons Row */}
-        <div className="flex gap-2 mt-3">
-          {/* RESTORED: Reply Button - Always Visible */}
+        {/* ENHANCED: Action Buttons Row - Always visible for accessibility */}
+        <div className="flex gap-2 pt-2">
+          {/* PRIORITY: Reply Button - Always Visible for Issue #5 */}
           {onReply && (
             <button
               onClick={(e) => {
@@ -293,45 +343,45 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
               }}
               className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-white bg-green-500 hover:bg-green-600 rounded transition-colors"
             >
-              <MessageSquare className="w-3 h-3" />
+              <MessageSquare size={14} />
               Reply
             </button>
           )}
 
-          {/* View Button */}
+          {/* View Button - ENHANCED for Issue #5 */}
           <button
             onClick={handleViewClick}
-            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded transition-colors"
           >
-            <ExternalLink className="w-3 h-3" />
+            <Eye size={14} />
             View
           </button>
 
-          {/* Buy Button */}
+          {/* Buy Button - ENHANCED for Issue #5 */}
           <button
             onClick={handleBuyClick}
             disabled={isOutOfStock}
             className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded transition-colors ${
-              isOutOfStock 
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
+              isOutOfStock
+                ? 'text-gray-400 dark:text-gray-600 bg-gray-100 dark:bg-gray-800 cursor-not-allowed'
+                : 'text-white bg-purple-500 hover:bg-purple-600'
             }`}
           >
-            <ShoppingCart className="w-3 h-3" />
+            <ShoppingCart size={14} />
             {isOutOfStock ? 'Sold Out' : 'Buy'}
           </button>
         </div>
 
         {/* Additional Info */}
         {!showCompact && (
-          <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
+          <div className="pt-2 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
             {product.product_type && (
-              <span className="bg-gray-100 px-2 py-1 rounded">
+              <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                 {product.product_type}
               </span>
             )}
             {product.variants_count && product.variants_count > 1 && (
-              <span className="bg-gray-100 px-2 py-1 rounded">
+              <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                 {product.variants_count} variants
               </span>
             )}
@@ -341,7 +391,7 @@ ${product.inventory_quantity ? `In Stock: ${product.inventory_quantity}` : ''}
 
       {/* Selection Indicator */}
       {isSelected && (
-        <div className="absolute inset-0 border-2 border-blue-500 rounded-lg pointer-events-none" />
+        <div className="absolute inset-0 pointer-events-none border-2 border-blue-500 rounded-lg" />
       )}
     </div>
   );
