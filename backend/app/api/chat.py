@@ -1390,7 +1390,7 @@ async def chat_endpoint(
                         joinedload(Order.addresses)  # Add this to load address data
                     )
                     
-                    query = query.filter(Order.order_number == order_number_int)
+                    query = query.filter(Order.order_number == str(order_number_int))
                     query = query.filter(Order.email == email)
                     order = query.first()
                     
