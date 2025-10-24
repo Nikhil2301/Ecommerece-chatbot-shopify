@@ -119,6 +119,30 @@ export interface OrderLineItem {
   vendor?: string;
   sku?: string;
   product_id?: string | number;
+  image_url?: string;
+  images?: ProductImage[];
+  variant_id?: string | number;
+  variant_title?: string;
+  product_handle?: string;
+  product_exists?: boolean;
+  taxable?: boolean;
+  requires_shipping?: boolean;
+  fulfillment_status?: string;
+  tax_lines?: Array<{
+    title: string;
+    price: string;
+    rate: number;
+    price_set: {
+      shop_money: {
+        amount: string;
+        currency_code: string;
+      };
+      presentment_money: {
+        amount: string;
+        currency_code: string;
+      };
+    };
+  }>;
 }
 
 export interface EnhancedChatResponse {
