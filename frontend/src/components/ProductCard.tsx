@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { Star, ShoppingCart, Eye, Tag, Zap, MessageSquare, ExternalLink } from 'lucide-react';
+import { formatPrice } from '@/utils/currency';
 
 interface ProductCardProps {
   product: {

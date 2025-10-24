@@ -663,6 +663,8 @@ async def chat_endpoint(
                 'cached_suggestions': [],  # Full list of suggestions
                 'current_exact_page': 1,  # Current page for exact matches
                 'current_suggestions_page': 1,  # Current page for suggestions
+                'last_order': None,  # Store the last viewed order details
+                'last_order_products': []  # Store products from last viewed order
             }
         
         # ============================================================================
@@ -700,7 +702,37 @@ async def chat_endpoint(
                 session_context[session_id]['selected_product'] = selected_product
         
         # ============================================================================
-        # END CRITICAL FIX for Issue #1 & #6
+        # 0. CHECK FOR ORDER-RELATED FOLLOW-UP QUESTIONS
+        # ============================================================================
+        last_order = session_context[session_id].get('last_order')
+        if last_order and any(phrase in chat_message.message.lower() for phrase in [
+            'show me what i ordered',
+            'what did i order',
+            'show ordered items',
+            'show my order',
+            'which product is ordered',
+            'show me the ordered product',
+            'what products did i order',
+            'show my ordered items'
+        ]):
+            logger.info("Detected order items follow-up question")
+            # Return the ordered products in a slider format
+            return ChatResponse(
+                response=f"Here are the items from your order #{last_order['order_number']}:",
+                intent="ORDER_ITEMS_FOLLOW_UP",
+                confidence=0.95,
+                exact_matches=session_context[session_id].get('last_order_products', []),
+                show_exact_slider=True,
+                show_suggestions_slider=False,
+                suggested_questions=[
+                    "Track my order status",
+                    "When will my order arrive?",
+                    "Cancel my order"
+                ]
+            )
+            
+        # ============================================================================
+        # 1. INTENT DETECTION
         # ============================================================================
         
         # Parse user preferences
@@ -1419,7 +1451,7 @@ async def chat_endpoint(
                                 "vendor": getattr(item, "vendor", ""),
                                 "sku": getattr(item, "sku", ""),
                             })
-                        
+                            
                         # ENHANCED: Format addresses
                         addresses = []
                         for addr in getattr(order, "addresses", []):
@@ -1448,11 +1480,23 @@ async def chat_endpoint(
                             "currency": order.currency,
                             "created_at": order.created_at.isoformat() if order.created_at else None,
                             "line_items": line_items,
+                            # Ensure no product recommendations are shown with order details
+                            "show_exact_slider": False,
+                            "show_suggestions_slider": False,
                             "addresses": addresses,  # Include address data
                             "total_items": sum(item["quantity"] for item in line_items)
                         }
                         
                         orders = [order_info]
+                        
+                        # Store order context for follow-up questions
+                        session_context[session_id]["last_order"] = order_info
+                        
+                        # Store ordered products for easy reference
+                        session_context[session_id]["last_order_products"] = line_items
+                        
+                        # Clear any product context when showing order details
+                        session_context[session_id]["context_product"] = None
                         
                         # ENHANCED: Generate focused response based on query type
                         response_text = openai_service.generate_order_response(orders, chat_message.message)

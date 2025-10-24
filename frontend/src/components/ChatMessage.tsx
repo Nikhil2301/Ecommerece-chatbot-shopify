@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react';
 import { Bot, User, Clock, MessageSquare, Lightbulb, ChevronRight, Filter, Star, Eye, EyeOff, ShoppingBag, Package, Heart } from 'lucide-react';
+import { formatPrice } from '@/utils/currency';
 import ProductCard from './ProductCard';
 import OrderCard from './OrderCard';
 
@@ -63,10 +64,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const isBot = message.sender === 'bot';
 
   // Support both new dual slider format and legacy format
-  const exactMatches = message.exact_matches || (message.show_exact_slider !== false ? message.products : []) || [];
+  const exactMatches = message.exact_matches || [];
   const suggestions = message.suggestions || [];
-  const hasExactMatches = exactMatches.length > 0 && message.show_exact_slider !== false;
-  const hasSuggestions = suggestions.length > 0 && message.show_suggestions_slider !== false;
+  
+  // Only show sliders if explicitly enabled and not in order context
+  const isOrderContext = message.orders && message.orders.length > 0;
+  const hasExactMatches = !isOrderContext && exactMatches.length > 0 && message.show_exact_slider === true;
+  const hasSuggestions = !isOrderContext && suggestions.length > 0 && message.show_suggestions_slider === true;
   const hasOrders = message.orders && message.orders.length > 0;
   const hasSuggestedQuestions = message.suggested_questions && message.suggested_questions.length > 0;
   const hasAppliedFilters = message.applied_filters && Object.keys(message.applied_filters).length > 0;
@@ -312,10 +316,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                   <p className="text-sm font-semibold text-gray-900 truncate">{productForContext.title}</p>
                   {productForContext.price && (
                     <p className="text-sm text-gray-600">
-                      ${typeof productForContext.price === 'string' ? 
-                          productForContext.price : 
-                          productForContext.price.toFixed(2)
-                        }
+                      {formatPrice(productForContext.price)}
                     </p>
                   )}
                 </div>
@@ -385,10 +386,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                   <p className="text-sm font-medium text-gray-900 truncate">{message.reply_to.product.title}</p>
                   {message.reply_to.product.price && (
                     <p className="text-xs text-gray-600">
-                      ${typeof message.reply_to.product.price === 'string' ? 
-                          message.reply_to.product.price : 
-                          message.reply_to.product.price.toFixed(2)
-                        }
+                      {formatPrice(message.reply_to.product.price)}
                     </p>
                   )}
                   {message.reply_to.product.vendor && (
@@ -452,7 +450,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               )}
               {message.applied_filters!.price_filter?.max && (
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
-                  Under ${message.applied_filters!.price_filter.max}
+                  Under {formatPrice(message.applied_filters!.price_filter.max)}
                 </span>
               )}
               {message.applied_filters!.brand_filter && (
