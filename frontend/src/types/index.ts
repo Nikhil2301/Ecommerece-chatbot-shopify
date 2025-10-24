@@ -102,10 +102,33 @@ export interface Order {
   financial_status?: string;
   fulfillment_status?: string;
   total_price: number | string;
+  subtotal_price?: number | string;
+  total_tax?: number | string;
   currency?: string;
   created_at?: string;
+  updated_at?: string;
   line_items?: OrderLineItem[];
   total_items?: number;
+  shipping_lines?: Array<{
+    title: string;
+    price: string | number;
+    code?: string;
+    source?: string;
+  }>;
+  discount_codes?: Array<{
+    code: string;
+    amount: string | number;
+    type: string;
+  }>;
+  shipping_address?: Address;
+  billing_address?: Address;
+  fulfillments?: Fulfillment[];
+  payment_details?: {
+    credit_card_company?: string;
+    credit_card_number?: string;
+    credit_card_exp_month?: string;
+    credit_card_exp_year?: string;
+  };
 }
 
 export interface OrderLineItem {
@@ -128,6 +151,11 @@ export interface OrderLineItem {
   taxable?: boolean;
   requires_shipping?: boolean;
   fulfillment_status?: string;
+  discount_allocations?: Array<{
+    amount: string | number;
+    discount_application_index: number;
+    discount_application_title?: string;
+  }>;
   tax_lines?: Array<{
     title: string;
     price: string;
@@ -170,6 +198,47 @@ export interface EnhancedChatResponse {
 }
 
 // Legacy interface for backward compatibility
+export interface Address {
+  id?: string | number;
+  first_name?: string;
+  last_name?: string;
+  company?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  province_code?: string;
+  country?: string;
+  country_code?: string;
+  zip?: string;
+  phone?: string;
+  name?: string;
+  country_name?: string;
+  default?: boolean;
+}
+
+export interface Fulfillment {
+  id: string | number;
+  order_id: string | number;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+  tracking_company?: string;
+  tracking_number?: string;
+  tracking_url?: string;
+  tracking_numbers?: string[];
+  tracking_urls?: string[];
+  line_items?: Array<{
+    id: string | number;
+    quantity: number;
+    title: string;
+    sku?: string;
+    variant_id?: string | number;
+    variant_title?: string;
+    product_id?: string | number;
+  }>;
+}
+
 export interface ChatResponse extends EnhancedChatResponse {
   products?: Product[];
 }

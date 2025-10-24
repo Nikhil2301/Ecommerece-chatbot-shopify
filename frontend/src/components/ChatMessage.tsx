@@ -516,7 +516,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
                   <ProductCard
                     product={product}
-                    isSelected={product.shopify_id === selectedProductId}
+                    selectedProductId={selectedProductId}
                     onClick={() => handleProductFocus(product.shopify_id, product)}
                     onReply={onQuoteProduct}
                     showCompact={exactToShow.length > 1}
@@ -572,7 +572,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 <ProductCard
                   key={`suggestion-${product.shopify_id || product.id}-${index}`}
                   product={product}
-                  isSelected={product.shopify_id === selectedProductId}
+                  selectedProductId={selectedProductId}
                   onClick={() => handleProductFocus(product.shopify_id, product)}
                   onReply={onQuoteProduct}
                   showCompact={true}

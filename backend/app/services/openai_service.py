@@ -25,6 +25,46 @@ class OpenAIService:
             logger.error(f"Failed to initialize OpenAI service: {e}")
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
             self.model = settings.OPENAI_MODEL
+            
+    async def detect_order_intent(self, message: str) -> dict:
+        """Detect if the message is asking about ordered items using OpenAI."""
+        system_prompt = """
+        You are an intent classification system. Determine if the user is asking about their previous orders.
+        Return a JSON with 'is_order_related' (boolean) and 'confidence' (0-1) fields.
+        """
+        
+        user_prompt = f"""
+        Message: "{message}"
+        
+        Is this message asking about previously ordered items or products?
+        Respond with a JSON object like: {{"is_order_related": boolean, "confidence": float}}
+        """
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"Order intent detection result: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in detect_order_intent: {str(e)}")
+            # Fallback to simple keyword matching if there's an error
+            order_keywords = ['order', 'ordered', 'purchase', 'bought', 'previous order', 'last order', 'my order']
+            lower_msg = message.lower()
+            is_related = any(keyword in lower_msg for keyword in order_keywords)
+            return {
+                "is_order_related": is_related,
+                "confidence": 0.7 if is_related else 0.1
+            }
 
     def analyze_user_intent_with_context(self, message: str, conversation_history: List[Dict], context_product: Optional[Dict] = None) -> Dict:
         """ENHANCED: Intent analysis with better context awareness to fix Issue #3"""

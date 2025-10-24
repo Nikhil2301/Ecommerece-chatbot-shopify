@@ -701,20 +701,20 @@ async def chat_endpoint(
                 session_context[session_id]['context_product'] = selected_product
                 session_context[session_id]['selected_product'] = selected_product
         
+        async def is_order_question(message: str, openai_service: OpenAIService) -> bool:
+            """Check if the message is asking about ordered items using OpenAI."""
+            try:
+                result = await openai_service.detect_order_intent(message)
+                return result.get('is_order_related', False) and result.get('confidence', 0) > 0.5
+            except Exception as e:
+                logger.error(f"Error in order intent detection: {e}")
+                return False  # Rely on OpenAI's natural language understanding
+
         # ============================================================================
         # 0. CHECK FOR ORDER-RELATED FOLLOW-UP QUESTIONS
         # ============================================================================
         last_order = session_context[session_id].get('last_order')
-        if last_order and any(phrase in chat_message.message.lower() for phrase in [
-            'show me what i ordered',
-            'what did i order',
-            'show ordered items',
-            'show my order',
-            'which product is ordered',
-            'show me the ordered product',
-            'what products did i order',
-            'show my ordered items'
-        ]):
+        if last_order and await is_order_question(chat_message.message, openai_service):
             logger.info("Detected order items follow-up question")
             # Return the ordered products in a slider format
             return ChatResponse(
