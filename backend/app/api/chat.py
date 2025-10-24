@@ -704,32 +704,167 @@ async def chat_endpoint(
         async def is_order_question(message: str, openai_service: OpenAIService) -> bool:
             """Check if the message is asking about ordered items using OpenAI."""
             try:
+                # First check for address-specific queries
+                address_terms = ['address', 'shipping', 'billing', 'delivery address', 'where is my order']
+                if any(term in message.lower() for term in address_terms):
+                    return True
+                    
+                # Then check with OpenAI for other order-related queries
                 result = await openai_service.detect_order_intent(message)
                 return result.get('is_order_related', False) and result.get('confidence', 0) > 0.5
             except Exception as e:
                 logger.error(f"Error in order intent detection: {e}")
-                return False  # Rely on OpenAI's natural language understanding
+                # Fallback to simple keyword matching
+                order_terms = ['order', 'ordered', 'purchase', 'my order', 'track order']
+                return any(term in message.lower() for term in order_terms)
 
         # ============================================================================
         # 0. CHECK FOR ORDER-RELATED FOLLOW-UP QUESTIONS
         # ============================================================================
         last_order = session_context[session_id].get('last_order')
-        if last_order and await is_order_question(chat_message.message, openai_service):
-            logger.info("Detected order items follow-up question")
-            # Return the ordered products in a slider format
-            return ChatResponse(
-                response=f"Here are the items from your order #{last_order['order_number']}:",
-                intent="ORDER_ITEMS_FOLLOW_UP",
-                confidence=0.95,
-                exact_matches=session_context[session_id].get('last_order_products', []),
-                show_exact_slider=True,
-                show_suggestions_slider=False,
-                suggested_questions=[
-                    "Track my order status",
-                    "When will my order arrive?",
-                    "Cancel my order"
-                ]
-            )
+        
+        # Check if this is a follow-up question about an existing order
+        is_follow_up = last_order and await is_order_question(chat_message.message, openai_service)
+        
+        # Also check if this is a direct order lookup with number/email
+        extracted_info = extract_order_info(chat_message.message)
+        has_order_info = extracted_info['order_number'] or extracted_info['email']
+        
+        if is_follow_up or (has_order_info and not last_order):
+            message_lower = chat_message.message.lower()
+            
+            # If we have order info but no last_order, try to fetch it
+            if has_order_info and not last_order:
+                order_number = extracted_info['order_number']
+                email = extracted_info['email'] or chat_message.email
+                
+                if order_number and email:
+                    try:
+                        order_number_int = int(order_number)
+                        query = db.query(Order).options(
+                            joinedload(Order.line_items),
+                            joinedload(Order.addresses)
+                        ).filter(
+                            Order.order_number == str(order_number_int),
+                            Order.email == email
+                        ).first()
+                        
+                        if query:
+                            # Format order details similar to the main order lookup
+                            line_items = [{
+                                "id": getattr(item, "shopify_line_id", item.id),
+                                "name": getattr(item, "name", ""),
+                                "title": getattr(item, "title", ""),
+                                "quantity": getattr(item, "quantity", 0),
+                                "price": getattr(item, "price", 0),
+                                "total_discount": getattr(item, "total_discount", 0),
+                                "vendor": getattr(item, "vendor", ""),
+                                "sku": getattr(item, "sku", ""),
+                            } for item in query.line_items]
+                            
+                            addresses = [{
+                                "address_type": getattr(addr, "address_type", ""),
+                                "name": getattr(addr, "name", ""),
+                                "company": getattr(addr, "company", ""),
+                                "address1": getattr(addr, "address1", ""),
+                                "address2": getattr(addr, "address2", ""),
+                                "city": getattr(addr, "city", ""),
+                                "province": getattr(addr, "province", ""),
+                                "zip": getattr(addr, "zip", ""),
+                                "country": getattr(addr, "country", ""),
+                                "phone": getattr(addr, "phone", "")
+                            } for addr in getattr(query, "addresses", [])]
+                            
+                            last_order = {
+                                "id": query.id,
+                                "shopify_id": query.shopify_id,
+                                "order_number": query.order_number,
+                                "email": query.email,
+                                "financial_status": query.financial_status,
+                                "fulfillment_status": query.fulfillment_status,
+                                "total_price": query.total_price,
+                                "currency": query.currency,
+                                "created_at": query.created_at.isoformat() if query.created_at else None,
+                                "line_items": line_items,
+                                "addresses": addresses,
+                                "total_items": sum(item["quantity"] for item in line_items)
+                            }
+                            
+                            # Store in session for future reference
+                            session_context[session_id]["last_order"] = last_order
+                            session_context[session_id]["last_order_products"] = line_items
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not convert order number {order_number} to int: {e}")
+
+                            
+                            # If we have a last_order (either from session or just fetched)
+            if last_order:
+                # Check for address-specific queries first
+                if any(term in message_lower for term in ['address', 'shipping', 'billing', 'delivery address', 'where is my order', 'where is it shipping from']):
+                    # Use the OpenAI service to generate an address-specific response
+                    response_text = openai_service._generate_address_response(last_order, chat_message.message)
+                                    
+                    # Dynamic suggested questions based on order status and query context
+                    suggested_questions = []
+                                    
+                    # Always include these basic questions
+                    base_questions = [
+                        "What's the status of my order?",
+                        "What items are in this order?"
+                    ]
+                                    
+                    # Add status-specific questions
+                    order_status = last_order.get('fulfillment_status', '').lower()
+                    if order_status == 'fulfilled':
+                        pass
+                    else:
+                        pass
+                    # Add tracking question if available
+                    if last_order.get('tracking_number'):
+                        pass
+                    # Combine and deduplicate questions
+                    suggested_questions = list(dict.fromkeys([*base_questions, *suggested_questions]))
+                                    
+                    return ChatResponse(
+                        response=response_text,
+                        intent="ORDER_ADDRESS_FOLLOW_UP",
+                        confidence=0.95,
+                        orders=[last_order],
+                        show_exact_slider=False,
+                        show_suggestions_slider=False,
+                        suggested_questions=suggested_questions[:3]  # Return top 3 most relevant
+                    )
+                else:
+                    # Default to showing order items for other order-related queries
+                    logger.info("Detected order items follow-up question")
+                    # Dynamic suggested questions for order items
+                    suggested_questions = [
+                        "What's the shipping address?",
+                        "What's the status of my order?"
+                    ]
+                    # Add delivery estimate if available
+                    if last_order.get('estimated_delivery'):
+                        suggested_questions.append(f"When will it be delivered?")
+                    else:
+                        suggested_questions.append("When will it ship?")
+                    # Add tracking question if available
+                    if last_order.get('tracking_number'):
+                        suggested_questions.append("Can I track my package?")
+                    # Add return question if order was delivered
+                    if last_order.get('fulfillment_status', '').lower() == 'fulfilled':
+                        suggested_questions.append("How do I return an item?")
+                    # Ensure we don't exceed 3 questions
+                    suggested_questions = suggested_questions[:3]
+                    return ChatResponse(
+                        response=openai_service._generate_items_response(last_order, chat_message.message),
+                        intent="ORDER_ITEMS_FOLLOW_UP",
+                        confidence=0.95,
+                        exact_matches=session_context[session_id].get('last_order_products', []),
+                        orders=[last_order],
+                        show_exact_slider=True,
+                        show_suggestions_slider=False,
+                        suggested_questions=suggested_questions
+                    )
             
         # ============================================================================
         # 1. INTENT DETECTION
