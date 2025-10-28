@@ -7,7 +7,7 @@
   document.body.appendChild(container);
 
   var script = document.createElement('script');
-  script.src = 'https://aicommerce.cinohub.com/_next/static/chunks/main.js'; // Update with your deployed Next.js build output
+  script.src = 'https://aicommerce.cinohub.com/_next/static/chunks/main-9908918ff4199678.js'; // Update with your deployed Next.js build output
   script.async = true;
   document.body.appendChild(script);
 
