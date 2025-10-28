@@ -14,6 +14,9 @@ from app.api.orders import router as orders_router
 from app.api.webhooks import router as webhooks_router
 from app.api.auth import router as auth_router
 
+# NEW: Import Shopify OAuth router
+from app.api.shopify_auth import router as shopify_auth_router
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +53,7 @@ app.add_middleware(
 )
 
 # Include API routers
+app.include_router(shopify_auth_router, prefix="/api", tags=["Shopify OAuth"])  # NEW
 app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 app.include_router(products_router, prefix="/api/v1", tags=["products"])
 app.include_router(orders_router, prefix="/api/v1", tags=["orders"])
@@ -136,7 +140,8 @@ async def root():
             "Order Management",
             "Dual Slider Results",
             "Smart Filtering",
-            "Contextual Conversations"
+            "Contextual Conversations",
+            "Shopify App Integration"  # NEW
         ]
     }
 

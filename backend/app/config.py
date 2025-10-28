@@ -16,6 +16,12 @@ class Settings:
     SHOPIFY_API_VERSION = os.getenv("SHOPIFY_API_VERSION", "2024-04")
     SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
     SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
+
+    # Shopify App OAuth (NEW)
+    SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
+    SHOPIFY_API_SECRET = os.getenv("SHOPIFY_API_SECRET")
+    APP_URL = os.getenv("APP_URL", "http://localhost:8000")
+    OAUTH_SCOPES = "read_products,read_orders,read_customers"
     
     APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
     APP_PORT = int(os.getenv("APP_PORT", 8000))

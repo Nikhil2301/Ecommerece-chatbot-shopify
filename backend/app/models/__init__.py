@@ -13,6 +13,7 @@ from .line_item_tax_line import LineItemTaxLine
 from .order_address import OrderAddress
 from .chat import User, ChatSession, ChatMessage
 from .chat_extras import ChatMessageProduct, ChatMessageOrder
+from .shop import Shop
 
 __all__ = [
     "Product",
@@ -31,4 +32,5 @@ __all__ = [
     "ChatMessage",
     "ChatMessageProduct",
     "ChatMessageOrder",
+    "Shop",
 ]

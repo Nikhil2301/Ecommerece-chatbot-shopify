@@ -7,6 +7,9 @@ from app.config import settings
 from app.database import get_db
 from app.services.data_sync import DataSyncService
 from app.services.vector_service import VectorService
+from app.models.shop import Shop
+from app.database import SessionLocal
+import requests
 
 logger = logging.getLogger("app.webhooks")
 router = APIRouter()
@@ -260,3 +263,42 @@ async def orders(request: Request, db: Session = Depends(get_db), x_shopify_hmac
         return {"status": "success"}
     logger.error("Order sync failed: %s", data.get("id"))
     raise HTTPException(500, "Sync error")
+
+def get_shop(shop_domain):
+    db = SessionLocal()
+    shop = db.query(Shop).filter(Shop.shop == shop_domain).first()
+    db.close()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    return shop
+
+@router.get("/webhooks")
+def list_webhooks(shop_domain: str):
+    shop = get_shop(shop_domain)
+    url = f"https://{shop.shop}/admin/api/{shop.api_version}/webhooks.json"
+    headers = {"X-Shopify-Access-Token": shop.access_token}
+    resp = requests.get(url, headers=headers)
+    return resp.json()
+
+@router.post("/webhooks")
+def create_webhook(shop_domain: str, topic: str, address: str):
+    shop = get_shop(shop_domain)
+    url = f"https://{shop.shop}/admin/api/{shop.api_version}/webhooks.json"
+    headers = {"X-Shopify-Access-Token": shop.access_token}
+    data = {
+        "webhook": {
+            "topic": topic,
+            "address": address,
+            "format": "json"
+        }
+    }
+    resp = requests.post(url, json=data, headers=headers)
+    return resp.json()
+
+@router.delete("/webhooks/{webhook_id}")
+def delete_webhook(shop_domain: str, webhook_id: int):
+    shop = get_shop(shop_domain)
+    url = f"https://{shop.shop}/admin/api/{shop.api_version}/webhooks/{webhook_id}.json"
+    headers = {"X-Shopify-Access-Token": shop.access_token}
+    resp = requests.delete(url, headers=headers)
+    return resp.json()
