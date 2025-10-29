@@ -1,15 +1,27 @@
 // public/embed.js
 (function() {
-  if (window.ChatbotLoaded) return;
-  window.ChatbotLoaded = true;
-  var container = document.createElement('div');
-  container.id = 'shopify-chatbot-root';
+  if (window.ChatbotIframe) return;
+  
+  const iframe = document.createElement('iframe');
+  iframe.src = 'http://aicommerce.cinohub.com:3001';
+  iframe.style.border = 'none';
+  iframe.style.width = '100%';
+  iframe.style.height = '100%';
+  iframe.setAttribute('allow', 'cookies');
+  iframe.setAttribute('crossorigin', 'anonymous');
+  iframe.setAttribute('credentialless', 'false');
+  
+  const container = document.createElement('div');
+  container.id = 'chatbot-iframe-container';
+  container.style.position = 'fixed';
+  container.style.bottom = '20px';
+  container.style.right = '20px';
+  container.style.width = '400px';
+  container.style.height = '600px';
+  container.style.zIndex = '9999';
+  
+  container.appendChild(iframe);
   document.body.appendChild(container);
-
-  var script = document.createElement('script');
-  script.src = 'https://aicommerce.cinohub.com/_next/static/chunks/main-9908918ff4199678.js'; // Update with your deployed Next.js build output
-  script.async = true;
-  document.body.appendChild(script);
-
-  // Optionally, you can use an iframe for isolation
+  
+  window.ChatbotIframe = iframe;
 })();

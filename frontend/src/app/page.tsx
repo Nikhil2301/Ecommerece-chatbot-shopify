@@ -1,116 +1,44 @@
+// frontend/src/app/page.tsx
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import ChatBot from '@/components/ChatBot';
-import ProductCard from '@/components/ProductCard';
-import OrderCard from '@/components/OrderCard';
-import { MessageCircle, Home, ShoppingBag, Package } from 'lucide-react';
-import ThemeToggle from '@/components/ThemeToggle';
 
 export default function HomePage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const router = useRouter();
 
   const toggleChat = () => {
     setIsChatOpen(!isChatOpen);
   };
 
-  const navigateToHome = () => {
-    router.push('/home');
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-white dark:from-gray-950 dark:to-gray-900">
-      {/* Header */}
-      <header className="bg-white/80 dark:bg-gray-900/60 backdrop-blur shadow-sm border-b border-gray-200 dark:border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <ShoppingBag className="w-8 h-8 text-blue-600 mr-3" />
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">AI Ecommerce</h1>
-            </div>
-            
-            {/* Navigation Buttons */}
-            <div className="flex items-center space-x-3">
-              <ThemeToggle compact />
-              <button
-                onClick={navigateToHome}
-                className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 shadow-md font-medium"
-              >
-                <MessageCircle className="w-5 h-5 mr-2" />
-                Open Chat Assistant
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-            Your Intelligent Shopping Assistant
-          </h2>
-          <p className="text-lg text-gray-600 dark:text-gray-300 leading-relaxed max-w-3xl mx-auto">
-            Discover products, check order status, and get personalized recommendations 
-            through our AI-powered chatbot. Powered by GPT-4o-mini and integrated with Shopify.
-          </p>
-        </div>
-
-        {/* Features Grid */}
-        <div className="grid md:grid-cols-3 gap-8 mb-12">
-          <div className="text-center p-8 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-lg hover:shadow-xl transition-shadow">
-            <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <MessageCircle className="w-8 h-8 text-white" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">Smart Product Search</h3>
-            <p className="text-gray-600 dark:text-gray-300">
-              Find exactly what you're looking for with our AI-powered semantic search. 
-              Describe products in natural language and get relevant recommendations.
-            </p>
-          </div>
-          
-          <div className="text-center p-8 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-lg hover:shadow-xl transition-shadow">
-            <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Package className="w-8 h-8 text-white" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">Order Tracking</h3>
-            <p className="text-gray-600 dark:text-gray-300">
-              Check your order status, tracking information, and delivery updates 
-              instantly by just asking our chatbot assistant.
-            </p>
-          </div>
-          
-          <div className="text-center p-8 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-lg hover:shadow-xl transition-shadow">
-            <div className="w-16 h-16 bg-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <ShoppingBag className="w-8 h-8 text-white" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">Secure & Private</h3>
-            <p className="text-gray-600 dark:text-gray-300">
-              Your data is protected with enterprise-grade security. 
-              We never store personal information and all conversations are encrypted.
-            </p>
-          </div>
-        </div>
-
-        {/* Call to Action */}
-        <div className="text-center bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-700 dark:to-indigo-700 rounded-2xl p-12 text-white">
-          <h3 className="text-3xl font-bold mb-4">Ready to Start Shopping?</h3>
-          <p className="text-xl text-blue-100 mb-8">
-            Try our AI assistant and discover a new way to shop online
-          </p>
-          <button
-            onClick={navigateToHome}
-            className="inline-flex items-center px-8 py-4 bg-white text-blue-600 rounded-lg hover:bg-gray-100 transition-colors duration-200 font-semibold text-lg shadow-lg"
+    <div className="fixed bottom-6 right-6 z-50">
+      {!isChatOpen && (
+        <button
+          onClick={toggleChat}
+          className="w-14 h-14 rounded-full bg-gradient-to-r from-blue-600 to-purple-600 flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 focus:outline-none"
+          aria-label="Open chat"
+        >
+          <svg 
+            width="28" 
+            height="28" 
+            viewBox="0 0 24 24" 
+            fill="none"
+            className="text-white"
           >
-            <MessageCircle className="w-6 h-6 mr-3" />
-            Start Chatting Now
-          </button>
-        </div>
-      </main>
-      {/* Floating Chatbot (bottom-left) */}
-      <ChatBot isOpen={isChatOpen} onToggle={toggleChat} position="left" />
+            <circle cx="12" cy="12" r="12" fill="currentColor"/>
+            <path 
+              d="M12 17.5c3.037 0 5.5-2.053 5.5-4.5s-2.463-4.5-5.5-4.5-5.5 2.053-5.5 4.5 2.463 4.5 5.5 4.5z" 
+              fill="#9333ea"
+            />
+            <path 
+              d="M8.5 12.995c-.197 0-.394-.146-.451-.345.65-2.335 2.341-3.65 4.453-3.65s3.803 1.315 4.453 3.65c-.057.199-.254.345-.451.345H8.5z" 
+              fill="#2563eb"
+            />
+          </svg>
+        </button>
+      )}
+      <ChatBot isOpen={isChatOpen} onToggle={toggleChat} position="right" />
     </div>
   );
 }
